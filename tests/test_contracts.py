@@ -1,13 +1,16 @@
-"""Contract tests for LanderEnv (§5.2, §5.4, §5.5).
+"""Contract tests for LanderEnv (§5.2, §5.4, §5.5 — updated contract).
 
 Tests verify:
   1. obs shape (8,)
   2. action shape (2,)
   3. info keys: touchdown_v, touchdown_vx, fuel_used, crashed, landed, truncated, outcome
-  4. reward returns named components dict (sum = reward)
-  5. compile-once: same jitted step runs Europa and Mars params without recompiling
-  6. domain randomization: different keys -> different states, same key -> same state
-  7. no NaN for rho0 = 0
+  4. reward returns named components dict (W2 sums them)
+  5. step returns 5-tuple: (obs, next_state, reward_components, done, info)
+  6. compile-once: same jitted step runs Europa and Mars params without recompiling
+  7. domain randomization: different keys -> different states, same key -> same state
+  8. no NaN for rho0 = 0
+  9. info["outcome"] is int32; info["truncated"] is bool
+  10. next_state is an EnvState pytree carrying body/vehicle params
 """
 
 import sys
@@ -21,7 +24,7 @@ import yaml
 # Add project root to path so we can import env/
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from env.lander_env import LanderEnv
+from env.lander_env import LanderEnv, EnvState
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +83,7 @@ def test_action_shape(europa_body, europa_vehicle):
     assert action.shape == (2,)
 
     key2 = jax.random.PRNGKey(99)
-    obs2, reward_components, done, info = LanderEnv.step(state, action, key2)
+    obs2, next_state, reward_components, done, info = LanderEnv.step(state, action, key2)
     assert obs2.shape == (8,), f"obs after step shape {obs2.shape} != (8,)"
 
 
@@ -97,7 +100,7 @@ def test_info_keys(europa_body, europa_vehicle):
     obs, state = LanderEnv.reset(key, europa_body, europa_vehicle)
 
     action = jnp.array([0.0, 0.0])
-    _, _, _, info = LanderEnv.step(state, action, jax.random.PRNGKey(99))
+    _, _, _, _, info = LanderEnv.step(state, action, jax.random.PRNGKey(99))
 
     missing = required_keys - set(info.keys())
     assert not missing, f"Missing info keys: {missing}"
@@ -112,7 +115,7 @@ def test_reward_named_components(europa_body, europa_vehicle):
     obs, state = LanderEnv.reset(key, europa_body, europa_vehicle)
 
     action = jnp.array([0.5, 0.0])
-    _, reward_components, _, _ = LanderEnv.step(state, action, jax.random.PRNGKey(99))
+    _, _, reward_components, _, _ = LanderEnv.step(state, action, jax.random.PRNGKey(99))
 
     assert isinstance(reward_components, dict), "reward_components must be a dict"
     assert len(reward_components) > 0, "reward_components must have at least one entry"
@@ -123,7 +126,27 @@ def test_reward_named_components(europa_body, europa_vehicle):
 
 
 # ---------------------------------------------------------------------------
-# Test 5: compile-once (same jitted step for Europa and Mars)
+# Test 5: step returns 5-tuple with next_state
+# ---------------------------------------------------------------------------
+def test_step_returns_5_tuple(europa_body, europa_vehicle):
+    """step() must return (obs, next_state, reward_components, done, info)."""
+    key = jax.random.PRNGKey(42)
+    obs, state = LanderEnv.reset(key, europa_body, europa_vehicle)
+
+    action = jnp.array([0.0, 0.0])
+    result = LanderEnv.step(state, action, jax.random.PRNGKey(99))
+    assert len(result) == 5, f"step must return 5-tuple, got {len(result)}"
+
+    obs2, next_state, reward_components, done, info = result
+    assert isinstance(next_state, EnvState), "next_state must be an EnvState"
+    # next_state carries body/vehicle params unchanged
+    assert jnp.allclose(next_state.g, state.g), "g must be carried forward"
+    assert jnp.allclose(next_state.mass0, state.mass0), "mass0 must be carried forward"
+    assert jnp.allclose(next_state.isp_s, state.isp_s), "isp_s must be carried forward"
+
+
+# ---------------------------------------------------------------------------
+# Test 6: compile-once (same jitted step for Europa and Mars)
 # ---------------------------------------------------------------------------
 def test_compile_once(europa_body, europa_vehicle):
     """Same jitted step must work with different body params (§5.3)."""
@@ -134,11 +157,11 @@ def test_compile_once(europa_body, europa_vehicle):
 
     # Reset and step with Europa
     obs_e, state_e = LanderEnv.reset(key, europa_body, europa_vehicle)
-    obs_e2, _, _, _ = LanderEnv.step(state_e, action, jax.random.PRNGKey(1))
+    obs_e2, _, _, _, _ = LanderEnv.step(state_e, action, jax.random.PRNGKey(1))
 
     # Reset and step with Mars (same vehicle params, different body)
     obs_m, state_m = LanderEnv.reset(key, mars_body, europa_vehicle)
-    obs_m2, _, _, _ = LanderEnv.step(state_m, action, jax.random.PRNGKey(1))
+    obs_m2, _, _, _, _ = LanderEnv.step(state_m, action, jax.random.PRNGKey(1))
 
     # Both should produce valid (8,) obs with no NaN
     assert obs_e2.shape == (8,)
@@ -151,7 +174,7 @@ def test_compile_once(europa_body, europa_vehicle):
 
 
 # ---------------------------------------------------------------------------
-# Test 6: domain randomization - different keys give different states
+# Test 7: domain randomization - different keys give different states
 # ---------------------------------------------------------------------------
 def test_randomization_different_keys(europa_body, europa_vehicle):
     """Two different keys must produce different initial states (§5.8)."""
@@ -171,7 +194,7 @@ def test_randomization_different_keys(europa_body, europa_vehicle):
 
 
 # ---------------------------------------------------------------------------
-# Test 7: domain randomization - same key reproduces exactly
+# Test 8: domain randomization - same key reproduces exactly
 # ---------------------------------------------------------------------------
 def test_randomization_same_key(europa_body, europa_vehicle):
     """Same key must reproduce exactly the same state (§5.8)."""
@@ -187,58 +210,85 @@ def test_randomization_same_key(europa_body, europa_vehicle):
 
 
 # ---------------------------------------------------------------------------
-# Test 8: no NaN for vacuum body (rho0=0)
+# Test 9: no NaN for vacuum body (rho0=0)
 # ---------------------------------------------------------------------------
 def test_no_nan_vacuum(europa_body, europa_vehicle):
-    """No NaN when rho0=0 (vacuum body)."""
+    """No NaN when rho0=0 (vacuum body). Run several steps."""
     assert europa_body["rho0"] == 0.0, "Europa must be vacuum"
 
     key = jax.random.PRNGKey(42)
     obs, state = LanderEnv.reset(key, europa_body, europa_vehicle)
+    assert not jnp.any(jnp.isnan(obs)), "NaN in initial obs"
 
-    # Run several steps
     for i in range(10):
         action = jnp.array([0.5, 0.1])
-        key = jax.random.PRNGKey(100 + i)
-        obs, reward_comp, done, info = LanderEnv.step(state, action, key)
+        step_key = jax.random.PRNGKey(100 + i)
+        obs, state, reward_comp, done, info = LanderEnv.step(state, action, step_key)
         assert not jnp.any(jnp.isnan(obs)), f"NaN in obs at step {i}"
         for name, val in reward_comp.items():
             assert not jnp.isnan(val), f"NaN in reward component '{name}' at step {i}"
-        state = state._replace(
-            x=state.x, y=state.y,  # update from step
-        )
-        # Update state from the step results
-        # For the loop to work we need to use the new state from step
-        # But step returns obs, not new_state. We'll re-derive state.
-        # This is a simplified loop just checking NaN; we know step
-        # internally updates state correctly.
-        break  # One step is sufficient for NaN check
+        if done:
+            break
 
 
 # ---------------------------------------------------------------------------
-# Test 9: step obs is (8,) after multiple steps
+# Test 10: info types — outcome is int32, truncated is bool
 # ---------------------------------------------------------------------------
-def test_multi_step_shapes(europa_body, europa_vehicle):
-    """Obs remains (8,) after multiple steps."""
+def test_info_types(europa_body, europa_vehicle):
+    """info['outcome'] must be int32, info['truncated'] must be bool."""
+    key = jax.random.PRNGKey(42)
+    obs, state = LanderEnv.reset(key, europa_body, europa_vehicle)
+
+    action = jnp.array([0.0, 0.0])
+    _, _, _, _, info = LanderEnv.step(state, action, jax.random.PRNGKey(99))
+
+    assert info["outcome"].dtype == jnp.int32, (
+        f"outcome must be int32, got {info['outcome'].dtype}"
+    )
+    assert info["truncated"].dtype == jnp.bool_, (
+        f"truncated must be bool, got {info['truncated'].dtype}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 11: done is a scalar
+# ---------------------------------------------------------------------------
+def test_done_scalar(europa_body, europa_vehicle):
+    """done must be a scalar."""
+    key = jax.random.PRNGKey(42)
+    obs, state = LanderEnv.reset(key, europa_body, europa_vehicle)
+
+    action = jnp.array([0.0, 0.0])
+    _, _, _, done, _ = LanderEnv.step(state, action, jax.random.PRNGKey(99))
+    assert done.shape == (), f"done shape must be scalar, got {done.shape}"
+
+
+# ---------------------------------------------------------------------------
+# Test 12: state has no rng field
+# ---------------------------------------------------------------------------
+def test_state_no_rng(europa_body, europa_vehicle):
+    """State must not carry an rng field (caller passes key to step)."""
+    key = jax.random.PRNGKey(42)
+    _, state = LanderEnv.reset(key, europa_body, europa_vehicle)
+
+    field_names = state._fields
+    assert "rng" not in field_names, "State must not have an 'rng' field"
+
+
+# ---------------------------------------------------------------------------
+# Test 13: step obs is (8,) after multiple steps (using next_state chain)
+# ---------------------------------------------------------------------------
+def test_multi_step_chain(europa_body, europa_vehicle):
+    """Chaining step via next_state: obs remains (8,), state is valid."""
     key = jax.random.PRNGKey(42)
     obs, state = LanderEnv.reset(key, europa_body, europa_vehicle)
 
     action = jnp.array([0.3, -0.2])
     for i in range(5):
-        key_step = jax.random.PRNGKey(200 + i)
-        obs, reward_comp, done, info = LanderEnv.step(state, action, key_step)
+        step_key = jax.random.PRNGKey(200 + i)
+        obs, state, reward_comp, done, info = LanderEnv.step(state, action, step_key)
         assert obs.shape == (8,), f"Step {i}: obs shape {obs.shape}"
         assert isinstance(reward_comp, dict)
-
-
-# ---------------------------------------------------------------------------
-# Test 10: done is a scalar
-# ---------------------------------------------------------------------------
-def test_done_scalar(europa_body, europa_vehicle):
-    """done must be a scalar float32."""
-    key = jax.random.PRNGKey(42)
-    obs, state = LanderEnv.reset(key, europa_body, europa_vehicle)
-
-    action = jnp.array([0.0, 0.0])
-    _, _, done, _ = LanderEnv.step(state, action, jax.random.PRNGKey(99))
-    assert done.shape == (), f"done shape must be scalar, got {done.shape}"
+        assert isinstance(state, EnvState)
+        if done:
+            break

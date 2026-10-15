@@ -1,25 +1,31 @@
 """LanderEnv — pure-JAX planetary landing environment.
 
-gymnax-style functional API (§5.2):
+gymnax-style functional API (§5.2, updated contract):
   reset(key, body_params, vehicle_params) -> obs, state
-  step(state, action, key) -> obs, reward_components, done, info
+  step(state, action, key) -> obs, next_state, reward_components, done, info
+
+State is a pytree that carries body_params and vehicle_params (copied in at
+reset, carried forward unchanged by step). No rng field — the caller passes
+a fresh key to each step, used only for sensor noise. The env does NOT
+auto-reset; W2's training loop handles resetting finished environments.
+
+done = terminated | truncated.
+info["outcome"] is int32: 0 running, 1 landed, 2 crashed, 3 timeout.
+info["truncated"] is a bool.
+reward = sum(reward_components.values()); W2 does the summing.
 
 Milestone 1: correct signatures, shapes, info keys. Dummy (Euler) dynamics.
 Milestone 2: real RK4 dynamics + analytic test passes.
-
-All arrays are float32 scalars/vectors. Body and vehicle params are
-pytrees of float32 scalars (compile-once rule §5.3).
 """
 
 from __future__ import annotations
 
-import math
 from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
 
-from env.dynamics import step_dynamics_euler, G0
+from env.dynamics import step_dynamics_euler
 from env.sensors import add_sensor_noise
 from env.terrain import terrain_height
 
@@ -28,7 +34,13 @@ from env.terrain import terrain_height
 # State container
 # ---------------------------------------------------------------------------
 class EnvState(NamedTuple):
-    """Full simulation state carried between steps."""
+    """Full simulation state carried between steps.
+
+    Includes body and vehicle parameters as float32 scalars so that one
+    compiled step can serve every body via vmap (compile-once rule §5.3).
+    No rng field — the caller passes a fresh key to each step.
+    """
+    # --- dynamic state ---
     x: jnp.ndarray          # horizontal position [m]
     y: jnp.ndarray          # altitude [m]
     vx: jnp.ndarray         # horizontal velocity [m/s]
@@ -37,29 +49,28 @@ class EnvState(NamedTuple):
     vy_prev: jnp.ndarray    # previous vy (for accel obs)
     mass: jnp.ndarray       # current mass [kg]
     t: jnp.ndarray          # elapsed time [s]
-    # --- nondim / episode constants (carried for convenience) ---
+    # --- nondim / episode constants (set at reset, carried unchanged) ---
     L: jnp.ndarray           # length unit = h0 [m]
     T_unit: jnp.ndarray      # time unit = sqrt(L/g) [s]
     U: jnp.ndarray           # velocity unit = sqrt(g*L) [m/s]
     t_max: jnp.ndarray       # episode time limit [s]
     dt: jnp.ndarray          # control timestep [s]
     max_thrust: jnp.ndarray  # max thrust [N]
-    # --- body / vehicle params (float32 scalars for jit) ---
+    # --- body params (float32 scalars) ---
     g: jnp.ndarray
+    rho0: jnp.ndarray
+    scale_height_m: jnp.ndarray
+    # --- vehicle params (float32 scalars) ---
     mass0: jnp.ndarray
     dry_mass: jnp.ndarray
     isp_s: jnp.ndarray
     gimbal_limit_rad: jnp.ndarray
     min_throttle: jnp.ndarray
-    rho0: jnp.ndarray
-    scale_height_m: jnp.ndarray
     cd: jnp.ndarray
     area_m2: jnp.ndarray
-    # success thresholds (for reward)
+    # --- success thresholds (from body config) ---
     vy_max_mps: jnp.ndarray
     vx_max_mps: jnp.ndarray
-    # done flag
-    done: jnp.ndarray
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +93,9 @@ class LanderEnv:
         vehicle_params: dict[str, Any],
     ) -> tuple[jnp.ndarray, EnvState]:
         """Reset the environment and return initial (obs, state).
+
+        Body and vehicle parameters are copied into the state pytree so that
+        step() needs only (state, action, key) — no separate param dicts.
 
         Args:
             key: PRNG key
@@ -148,13 +162,12 @@ class LanderEnv:
             mass=mass0, t=jnp.float32(0.0),
             L=L, T_unit=T_unit, U=U, t_max=t_max, dt=dt,
             max_thrust=max_thrust,
-            g=g, mass0=mass0, dry_mass=dry_mass,
+            g=g, rho0=rho0, scale_height_m=scale_height_m,
+            mass0=mass0, dry_mass=dry_mass,
             isp_s=isp_s, gimbal_limit_rad=gimbal_limit_rad,
             min_throttle=min_throttle,
-            rho0=rho0, scale_height_m=scale_height_m,
             cd=cd, area_m2=area_m2,
             vy_max_mps=vy_max_mps, vx_max_mps=vx_max_mps,
-            done=jnp.float32(0.0),
         )
 
         obs = _make_obs(state, k_noise)
@@ -165,18 +178,19 @@ class LanderEnv:
         state: EnvState,
         action: jnp.ndarray,
         key: jax.Array,
-    ) -> tuple[jnp.ndarray, dict[str, jnp.ndarray], jnp.ndarray, dict[str, jnp.ndarray]]:
+    ) -> tuple[jnp.ndarray, EnvState, dict[str, jnp.ndarray], jnp.ndarray, dict[str, jnp.ndarray]]:
         """Take one control step.
 
         Args:
-            state: current EnvState
+            state: current EnvState (carries body/vehicle params)
             action: shape (2,) [throttle ∈ [-1,1], thrust_angle ∈ [-1,1]]
-            key: PRNG key
+            key: PRNG key (used only for sensor noise; physics is deterministic)
 
         Returns:
-            obs: shape (8,)
-            reward_components: dict of named reward terms (sum = total reward)
-            done: scalar bool/float32
+            obs: shape (8,) — noisy observation for the policy
+            next_state: EnvState — updated state pytree
+            reward_components: dict of named reward terms (W2 sums them)
+            done: scalar bool — terminated | truncated
             info: dict of ground-truth metrics for eval
         """
         key, k_noise = jax.random.split(key)
@@ -222,11 +236,11 @@ class LanderEnv:
         landed_soft = contacted & soft_vy & soft_vx
         crashed = contacted & ~landed_soft
 
-        # Outcome: 0=in_flight, 1=landed_soft, 2=crashed, 3=timeout
+        # outcome: int32 — 0 running, 1 landed, 2 crashed, 3 timeout
         outcome = jnp.where(
-            landed_soft, jnp.float32(1.0),
-            jnp.where(crashed, jnp.float32(2.0),
-                       jnp.where(truncated, jnp.float32(3.0), jnp.float32(0.0)))
+            landed_soft, jnp.int32(1),
+            jnp.where(crashed, jnp.int32(2),
+                       jnp.where(truncated, jnp.int32(3), jnp.int32(0)))
         )
 
         info = {
@@ -235,11 +249,11 @@ class LanderEnv:
             "fuel_used": fuel_used,
             "crashed": crashed.astype(jnp.float32),
             "landed": landed_soft.astype(jnp.float32),
-            "truncated": truncated.astype(jnp.float32),
-            "outcome": outcome,
+            "truncated": truncated,  # bool, per contract
+            "outcome": outcome,      # int32, per contract
         }
 
-        # --- Reward (§5.5, named components) ---
+        # --- Reward (§5.5, named components; W2 sums them) ---
         v_mag_nondim = jnp.sqrt(vx_new**2 + vy_new**2) / state.U
         h_nondim = jnp.abs(y_new) / state.L
         angle_norm = jnp.abs(thrust_angle) / (state.gimbal_limit_rad + 1e-8)
@@ -262,17 +276,16 @@ class LanderEnv:
             "landing": r_land,
         }
 
-        # --- New state ---
-        new_state = state._replace(
+        # --- Next state (body/vehicle params carried forward unchanged) ---
+        next_state = state._replace(
             x=x_new, y=y_new, vx=vx_new, vy=vy_new,
             vx_prev=state.vx, vy_prev=state.vy,
             mass=mass_new, t=t_new,
-            done=done.astype(jnp.float32),
         )
 
-        obs = _make_obs(new_state, k_noise)
+        obs = _make_obs(next_state, k_noise)
 
-        return obs, reward_components, done.astype(jnp.float32), info
+        return obs, next_state, reward_components, done, info
 
 
 # ---------------------------------------------------------------------------
