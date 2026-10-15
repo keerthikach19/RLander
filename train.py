@@ -1,0 +1,226 @@
+"""Hydra training skeleton for W2 milestone 1.
+
+The real-env/config/storage/eval adapter is intentionally pending W1/W3 merge.
+The standard selectors are accepted: +body=europa +vehicle=europa_lander +seed=1.
+An integration adapter, selected with +adapter=module:function, receives the
+Hydra config and returns TrainingBindings. Tests inject their own fake env.
+No production fake environment or guessed W1/W3 function signatures live here.
+"""
+
+import hashlib
+import importlib
+import json
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+import hydra
+import jax
+import numpy as np
+import orbax.checkpoint as ocp
+from flax import serialization
+from omegaconf import DictConfig, OmegaConf
+
+from rl.ppo import PPOConfig, make_train
+
+
+@dataclass
+class TrainingBindings:
+    """Explicit dependency injection until integration contracts are provided.
+
+    record_run receives the §8 runs row as a dict. evaluate receives the policy
+    parameters and ObsStats, and returns a JSON-serializable metric summary.
+    Frozen-seed evaluation and SQLite ownership remain with W3.
+    """
+
+    env: Any
+    body_params: Any
+    vehicle_params: Any
+    shaping_components: tuple[str, ...] = ()
+    record_run: Callable | None = None
+    evaluate: Callable | None = None
+    per_env_params: bool = False
+
+
+def _jsonable(value):
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, (jax.Array, np.ndarray, np.generic)):
+        return np.asarray(value).tolist()
+    return value
+
+
+def run_experiment(
+    bindings,
+    config,
+    *,
+    seed=1,
+    body_name="europa",
+    vehicle_name="europa_lander",
+    output_root="ckpts",
+    smoke_success_rate=None,
+):
+    """Train, checkpoint, log diagnostics, and invoke supplied integration hooks.
+
+    Without hooks, the manifest/printed summary explicitly mark DB/evaluation
+    pending; a fake-env test is never reported as a planetary landing result.
+    Full runs require evidence from a prior smoke evaluation (>10% success).
+    """
+    if config.total_steps > 1_000_000 and (
+        smoke_success_rate is None or not 0.1 < smoke_success_rate <= 1.0
+    ):
+        raise ValueError(
+            "A full run requires a prior smoke_success_rate > 0.10 (and <= 1)"
+        )
+    run_id = (
+        f"ppo-{body_name}-{seed}-{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid4().hex[:8]}"
+    )
+    if any(c in body_name for c in ("/", "\\", ":")):
+        raise ValueError("body_name must be a label, not a path")
+    run_dir = Path(output_root).resolve() / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+    run_config = _jsonable(
+        {
+            "ppo": asdict(config),
+            "seed": seed,
+            "body": body_name,
+            "vehicle": vehicle_name,
+            "body_params": bindings.body_params,
+            "vehicle_params": bindings.vehicle_params,
+            "shaping_components": bindings.shaping_components,
+            "per_env_params": bindings.per_env_params,
+            "smoke_success_rate": smoke_success_rate,
+        }
+    )
+    config_json = json.dumps(run_config, sort_keys=True, allow_nan=False)
+    metadata = {
+        "id": run_id,
+        "train_bodies_json": json.dumps([body_name]),
+        "vehicle": vehicle_name,
+        "policy_type": "ppo",
+        "reward_id": None,
+        "seed": seed,
+        "config_hash": hashlib.sha256(config_json.encode()).hexdigest(),
+        "jax_version": jax.__version__,
+        "checkpoint_path": str(run_dir / "checkpoint"),
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    manifest = {
+        "run": metadata,
+        "config": run_config,
+        "checkpoint_format_version": 1,
+        "status": "training",
+        "database_status": "pending",
+        "evaluation_status": "pending",
+    }
+
+    def write_manifest():
+        (run_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, allow_nan=False),
+            encoding="utf-8",
+        )
+
+    write_manifest()
+    with (run_dir / "metrics.jsonl").open("w", encoding="utf-8") as log:
+        log.write(json.dumps({"event": "config", **manifest}, allow_nan=False) + "\n")
+        log.flush()
+        result = make_train(
+            bindings.env,
+            config,
+            shaping_components=bindings.shaping_components,
+            per_env_params=bindings.per_env_params,
+        )(jax.random.key(seed), bindings.body_params, bindings.vehicle_params)
+        metrics = jax.device_get(result.metrics)
+        for index in range(config.num_updates):
+            row = _jsonable(jax.tree_util.tree_map(lambda x, i=index: x[i], metrics))
+            if row["shaping_check_available"]:
+                ratio = row["shaping_to_terminal_ratio"]
+                row["shaping_magnitude_status"] = (
+                    "below_target"
+                    if ratio < 0.2
+                    else "above_target"
+                    if ratio > 1
+                    else "in_range"
+                )
+            else:
+                row["shaping_magnitude_status"] = "unavailable"
+            log.write(json.dumps({"event": "update", **row}, allow_nan=False) + "\n")
+
+    runner = result.runner
+    payload = {
+        "train_state": serialization.to_state_dict(runner.train_state),
+        "obs_stats": serialization.to_state_dict(runner.obs_stats),
+        "env_state": serialization.to_state_dict(runner.env_state),
+        "obs": runner.obs,
+        "rng_key_data": jax.random.key_data(runner.key),
+        "episode_components": runner.episode_components,
+        "episode_lengths": runner.episode_lengths,
+    }
+    # Host arrays make GPU-trained checkpoints portable to CPU evaluation without
+    # restoring device/sharding assignments from the training machine.
+    payload = jax.device_get(payload)
+    with ocp.PyTreeCheckpointer() as checkpointer:
+        checkpointer.save(metadata["checkpoint_path"], payload)
+    manifest.update(
+        status="checkpoint_saved", actual_steps=config.num_updates * config.batch_size
+    )
+    write_manifest()
+    if bindings.record_run is not None:
+        bindings.record_run(metadata)
+        manifest["database_status"] = "recorded"
+        write_manifest()
+    if bindings.evaluate is not None:
+        manifest["evaluation"] = _jsonable(
+            bindings.evaluate(runner.train_state.params, runner.obs_stats)
+        )
+        manifest["evaluation_status"] = "complete"
+    else:
+        manifest["evaluation"] = {"status": "pending W3 evaluation adapter"}
+    manifest["status"] = "complete"
+    write_manifest()
+    print(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "checkpoint_path": metadata["checkpoint_path"],
+                "actual_steps": manifest["actual_steps"],
+                "database_status": manifest["database_status"],
+                "evaluation": manifest["evaluation"],
+            },
+            allow_nan=False,
+        )
+    )
+    return result, manifest
+
+
+@hydra.main(version_base=None, config_path=None, config_name=None)
+def main(cfg: DictConfig):
+    if not cfg.get("adapter"):
+        raise RuntimeError(
+            "W1/W3 integration is pending. Supply +adapter=module:function returning "
+            "TrainingBindings, or call run_experiment with an injected environment. "
+            "The milestone-1 fake environments live only in tests/test_rl.py."
+        )
+    module_name, function_name = cfg.adapter.rsplit(":", 1)
+    bindings = getattr(importlib.import_module(module_name), function_name)(cfg)
+    overrides = OmegaConf.to_container(
+        cfg.get("ppo", OmegaConf.create({})), resolve=True
+    )
+    run_experiment(
+        bindings,
+        PPOConfig(**overrides),
+        seed=int(cfg.get("seed", 1)),
+        body_name=cfg.get("body", "europa"),
+        vehicle_name=cfg.get("vehicle", "europa_lander"),
+        output_root=cfg.get("output_root", "ckpts"),
+        smoke_success_rate=cfg.get("smoke_success_rate"),
+    )
+
+
+if __name__ == "__main__":
+    main()

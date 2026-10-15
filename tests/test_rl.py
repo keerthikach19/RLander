@@ -1,5 +1,7 @@
 """W2 contract fakes; none of these environments are production dynamics."""
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,7 +22,7 @@ from rl.networks import (
     policy_action,
     update_obs_stats,
 )
-from rl.ppo import PPOConfig, compute_gae, make_train
+from rl.ppo import PPOConfig, compute_gae, make_train, ppo_loss
 from rl.vec_env import reset_envs, step_envs
 
 
@@ -235,6 +237,32 @@ def test_gae_bootstraps_timeouts_but_never_crosses_resets():
     )
 
 
+def test_ppo_clips_policy_and_value_losses_using_raw_actions():
+    actions = jnp.array([[2.0, 0.0], [-2.0, 0.0]])
+    batch = {
+        "obs": jnp.zeros((2, 8)),
+        "action": actions,
+        "log_prob": gaussian_log_prob(actions, jnp.zeros((2, 2)), jnp.zeros((2, 2))),
+        "advantage": jnp.array([1.0, -1.0]),
+        "value": jnp.zeros(2),
+        "return": jnp.array([2.0, -2.0]),
+    }
+
+    def apply_fn(params, obs):
+        return (
+            jnp.array([[1.0, 0.0], [1.0, 0.0]]),
+            jnp.zeros((2, 2)),
+            jnp.array([3.0, -3.0]),
+        )
+
+    loss, metrics = ppo_loss({}, apply_fn, batch, PPOConfig(ent_coef=0.0))
+    # Likelihood ratios exp(1.5), exp(-2.5) clip to 1.2 and 0.8 in the surrogate.
+    np.testing.assert_allclose(metrics["policy_loss"], -0.2, rtol=1e-6)
+    np.testing.assert_allclose(metrics["value_loss"], 0.5 * 1.8**2, rtol=1e-6)
+    np.testing.assert_allclose(loss, -0.2 + 0.5 * 0.5 * 1.8**2, rtol=1e-6)
+    assert float(metrics["clip_fraction"]) == 1.0
+
+
 def test_vector_reset_preserves_final_obs_and_ongoing_states():
     env = FakeEnv(horizon=3, timeout=True)
     body, vehicle = parameters()
@@ -391,3 +419,142 @@ def test_batched_parameters_remain_data_under_jit():
 def test_invalid_config_fails_early(kwargs):
     with pytest.raises(ValueError):
         PPOConfig(**kwargs)
+
+
+def test_checkpoint_logging_and_integration_hooks(tmp_path, capsys):
+    import orbax.checkpoint as ocp
+    from flax import serialization
+
+    from train import TrainingBindings, run_experiment
+
+    body, vehicle = parameters()
+    config = PPOConfig(
+        num_envs=4,
+        num_steps=4,
+        total_steps=32,
+        num_minibatches=2,
+        update_epochs=1,
+    )
+    recorded = []
+
+    def record_run(row):
+        assert Path(row["checkpoint_path"]).is_dir()
+        recorded.append(row)
+
+    def evaluate(params, obs_stats):
+        obs, _ = FakeEnv().reset(jax.random.key(10000), body, vehicle)
+        action = policy_action(params, obs_stats, obs)
+        assert np.isfinite(action).all()
+        return {
+            "fake_task_action_mse": float(
+                jnp.square(action - jnp.array([0.7, -0.4])).mean()
+            )
+        }
+
+    bindings = TrainingBindings(
+        FakeEnv(horizon=4),
+        body,
+        vehicle,
+        shaping_components=("tracking", "alive"),
+        record_run=record_run,
+        evaluate=evaluate,
+    )
+    result, manifest = run_experiment(
+        bindings,
+        config,
+        seed=4,
+        body_name="synthetic",
+        output_root=tmp_path,
+    )
+    assert len(recorded) == 1
+    assert recorded[0]["jax_version"] == jax.__version__
+    assert recorded[0]["seed"] == 4
+    assert json.loads(recorded[0]["train_bodies_json"]) == ["synthetic"]
+    assert manifest["database_status"] == "recorded"
+    assert manifest["evaluation_status"] == "complete"
+    assert manifest["actual_steps"] == 32
+    run_dir = Path(recorded[0]["checkpoint_path"]).parent
+    assert json.loads((run_dir / "manifest.json").read_text()) == manifest
+    rows = [
+        json.loads(line)
+        for line in (run_dir / "metrics.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == 1 + config.num_updates
+    assert rows[0]["config"]["seed"] == 4
+    assert rows[-1]["env_steps"] == 32
+    assert rows[-1]["reward_components"]["alive"] == -1.0
+    assert rows[-1]["shaping_magnitude_status"] != "unavailable"
+    assert json.loads(capsys.readouterr().out)["evaluation"] == manifest["evaluation"]
+    with ocp.PyTreeCheckpointer() as checkpointer:
+        restored = checkpointer.restore(recorded[0]["checkpoint_path"])
+    restored_state = serialization.from_state_dict(
+        result.runner.train_state, restored["train_state"]
+    )
+    restored_stats = serialization.from_state_dict(
+        result.runner.obs_stats, restored["obs_stats"]
+    )
+    np.testing.assert_array_equal(
+        policy_action(restored_state.params, restored_stats, result.runner.obs),
+        policy_action(
+            result.runner.train_state.params, result.runner.obs_stats, result.runner.obs
+        ),
+    )
+    for expected, actual in zip(
+        jax.tree_util.tree_leaves(result.runner.train_state.opt_state),
+        jax.tree_util.tree_leaves(restored_state.opt_state),
+    ):
+        np.testing.assert_array_equal(expected, actual)
+    np.testing.assert_array_equal(
+        restored["rng_key_data"], jax.random.key_data(result.runner.key)
+    )
+
+
+def test_skeleton_reports_pending_integrations(tmp_path, capsys):
+    from train import TrainingBindings, run_experiment
+
+    body, vehicle = parameters()
+    config = PPOConfig(
+        num_envs=2, num_steps=2, total_steps=4, num_minibatches=1, update_epochs=1
+    )
+    _, manifest = run_experiment(
+        TrainingBindings(FakeEnv(), body, vehicle),
+        config,
+        output_root=tmp_path,
+        body_name="synthetic",
+    )
+    assert manifest["database_status"] == manifest["evaluation_status"] == "pending"
+    assert "pending W3" in json.loads(capsys.readouterr().out)["evaluation"]["status"]
+
+
+def test_full_training_requires_successful_smoke_run(tmp_path):
+    from train import TrainingBindings, run_experiment
+
+    body, vehicle = parameters()
+    bindings = TrainingBindings(FakeEnv(), body, vehicle)
+    for rate in (None, 0.1, 1.1, float("nan")):
+        with pytest.raises(ValueError, match="prior smoke"):
+            run_experiment(
+                bindings, PPOConfig(), output_root=tmp_path, smoke_success_rate=rate
+            )
+    assert not list(tmp_path.iterdir())
+
+
+def test_hydra_accepts_planned_selectors():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "train.py",
+            "+body=europa",
+            "+vehicle=europa_lander",
+            "+seed=1",
+            "--cfg",
+            "job",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "body: europa" in result.stdout
+    assert "vehicle: europa_lander" in result.stdout
+    assert "seed: 1" in result.stdout
