@@ -1,10 +1,11 @@
-"""Hydra training skeleton for W2 milestone 1.
+"""Hydra training with LanderEnv and a frozen-seed smoke evaluation.
 
-The real-env/config/storage/eval adapter is intentionally pending W1/W3 merge.
-The standard selectors are accepted: +body=europa +vehicle=europa_lander +seed=1.
-An integration adapter, selected with +adapter=module:function, receives the
-Hydra config and returns TrainingBindings. Tests inject their own fake env.
-No production fake environment or guessed W1/W3 function signatures live here.
+The default adapter loads the named body/vehicle from configs/. W3's database
+and full evaluation pipeline remain pending; the smoke evaluator uses only the
+documented environment outputs. +adapter=module:function can override bindings.
+
+Exact 50k smoke: +body=europa +vehicle=europa_lander +seed=1
+    +ppo.num_envs=16 +ppo.num_steps=125 +ppo.total_steps=50000
 """
 
 import hashlib
@@ -19,11 +20,13 @@ from uuid import uuid4
 
 import hydra
 import jax
+import jax.numpy as jnp
 import numpy as np
 import orbax.checkpoint as ocp
 from flax import serialization
 from omegaconf import DictConfig, OmegaConf
 
+from rl.networks import policy_action
 from rl.ppo import PPOConfig, make_train
 
 
@@ -43,6 +46,124 @@ class TrainingBindings:
     record_run: Callable | None = None
     evaluate: Callable | None = None
     per_env_params: bool = False
+
+
+def evaluate_smoke(
+    env,
+    body_params,
+    vehicle_params,
+    params,
+    obs_stats,
+    *,
+    seeds=tuple(range(10_000, 10_100)),
+    max_steps=1024,
+):
+    """Temporary W2 smoke summary until W3's evaluation pipeline is merged.
+
+    Success is determined only from terminal info and body.success (§5.6),
+    independently of rewards. Each frozen seed has its own reset/noise stream;
+    episodes stop at their first done and never auto-reset during evaluation.
+    """
+    if not seeds or max_steps < 1:
+        raise ValueError("Evaluation needs seeds and a positive max_steps")
+
+    def episode(seed):
+        key, reset_key = jax.random.split(jax.random.key(seed))
+        obs, state = env.reset(reset_key, body_params, vehicle_params)
+        shapes = jax.eval_shape(env.step, state, jnp.zeros(2), key)
+        zeros = lambda shape: jnp.zeros(shape.shape, shape.dtype)
+        totals = jax.tree_util.tree_map(zeros, shapes[2])
+        info = jax.tree_util.tree_map(zeros, shapes[4])
+
+        def step(carry):
+            obs, state, key, _, count, totals, _ = carry
+            key, step_key = jax.random.split(key)
+            action = policy_action(params, obs_stats, obs)
+            obs, state, components, done, info = env.step(state, action, step_key)
+            totals = jax.tree_util.tree_map(jnp.add, totals, components)
+            return obs, state, key, done, count + 1, totals, info
+
+        _, _, _, done, count, totals, info = jax.lax.while_loop(
+            lambda c: ~c[3] & (c[4] < max_steps),
+            step,
+            (obs, state, key, jnp.asarray(False), jnp.asarray(0), totals, info),
+        )
+        thresholds = body_params["success"]
+        success = (
+            done
+            & (info["landed"] > 0)
+            & (jnp.abs(info["touchdown_v"]) < thresholds["vy_max_mps"])
+            & (jnp.abs(info["touchdown_vx"]) < thresholds["vx_max_mps"])
+        )
+        return {
+            "finished": done,
+            "steps": count,
+            "success": success,
+            "info": info,
+            "reward_components": totals,
+        }
+
+    episodes = jax.device_get(
+        jax.jit(jax.vmap(episode))(jnp.asarray(seeds, dtype=jnp.uint32))
+    )
+    if not np.asarray(episodes["finished"]).all():
+        raise RuntimeError("Smoke evaluation exceeded max_steps before env termination")
+    info = episodes["info"]
+    contact = np.isin(info["outcome"], [1, 2])
+
+    def contact_mean(values):
+        return float(np.mean(np.asarray(values)[contact])) if contact.any() else None
+
+    return {
+        "evaluation_type": "smoke",
+        "policy": "deterministic_mean",
+        "seeds": list(seeds),
+        "n_episodes": len(seeds),
+        "soft_landings": int(episodes["success"].sum()),
+        "soft_landing_rate": float(episodes["success"].mean()),
+        "landed": int((info["outcome"] == 1).sum()),
+        "crashed": int((info["outcome"] == 2).sum()),
+        "timeouts": int((info["outcome"] == 3).sum()),
+        "touchdown_abs_vy_mean_mps": contact_mean(np.abs(info["touchdown_v"])),
+        "touchdown_abs_vx_mean_mps": contact_mean(np.abs(info["touchdown_vx"])),
+        "fuel_used_mean_kg": float(np.mean(info["fuel_used"])),
+        "episode_steps_mean": float(episodes["steps"].mean()),
+        "reward_components_mean": {
+            name: float(values.mean())
+            for name, values in episodes["reward_components"].items()
+        },
+        "episodes": _jsonable(episodes),
+    }
+
+
+def lander_bindings(cfg):
+    """Load numeric parameter pytrees and bind the public LanderEnv API."""
+    from env.lander_env import LanderEnv
+
+    config_dir = Path(__file__).resolve().parent / "configs"
+
+    def load_params(filename, name):
+        row = OmegaConf.to_container(
+            OmegaConf.load(config_dir / filename)[name], resolve=True
+        )
+        # Names are metadata, not leaves of the compile-once numeric pytree.
+        row.pop("name", None)
+        return jax.tree_util.tree_map(
+            lambda value: jnp.asarray(value, dtype=jnp.float32), row
+        )
+
+    body = load_params("bodies.yaml", cfg.get("body", "europa"))
+    vehicle = load_params("vehicles.yaml", cfg.get("vehicle", "europa_lander"))
+    vehicle["max_thrust_N"] = vehicle["twr_max"] * vehicle["mass0_kg"] * body["g"]
+    return TrainingBindings(
+        LanderEnv(),
+        body,
+        vehicle,
+        shaping_components=("velocity", "altitude", "fuel", "angle"),
+        evaluate=lambda params, stats: evaluate_smoke(
+            LanderEnv(), body, vehicle, params, stats
+        ),
+    )
 
 
 def _jsonable(value):
@@ -190,7 +311,9 @@ def run_experiment(
                 "checkpoint_path": metadata["checkpoint_path"],
                 "actual_steps": manifest["actual_steps"],
                 "database_status": manifest["database_status"],
-                "evaluation": manifest["evaluation"],
+                "evaluation": {
+                    k: v for k, v in manifest["evaluation"].items() if k != "episodes"
+                },
             },
             allow_nan=False,
         )
@@ -200,14 +323,11 @@ def run_experiment(
 
 @hydra.main(version_base=None, config_path=None, config_name=None)
 def main(cfg: DictConfig):
-    if not cfg.get("adapter"):
-        raise RuntimeError(
-            "W1/W3 integration is pending. Supply +adapter=module:function returning "
-            "TrainingBindings, or call run_experiment with an injected environment. "
-            "The milestone-1 fake environments live only in tests/test_rl.py."
-        )
-    module_name, function_name = cfg.adapter.rsplit(":", 1)
-    bindings = getattr(importlib.import_module(module_name), function_name)(cfg)
+    if cfg.get("adapter"):
+        module_name, function_name = cfg.adapter.rsplit(":", 1)
+        bindings = getattr(importlib.import_module(module_name), function_name)(cfg)
+    else:
+        bindings = lander_bindings(cfg)
     overrides = OmegaConf.to_container(
         cfg.get("ppo", OmegaConf.create({})), resolve=True
     )

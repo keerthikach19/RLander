@@ -677,3 +677,79 @@ def test_hydra_accepts_planned_selectors():
     assert "body: europa" in result.stdout
     assert "vehicle: europa_lander" in result.stdout
     assert "seed: 1" in result.stdout
+
+
+def test_real_lander_bindings_train_without_an_environment_adapter():
+    from omegaconf import OmegaConf
+
+    from env.lander_env import LanderEnv
+    from train import lander_bindings
+
+    bindings = lander_bindings(
+        OmegaConf.create({"body": "europa", "vehicle": "europa_lander"})
+    )
+    assert isinstance(bindings.env, LanderEnv)
+    assert all(
+        leaf.dtype == jnp.float32
+        for leaf in jax.tree_util.tree_leaves(bindings.body_params)
+    )
+    config = PPOConfig(
+        num_envs=2, num_steps=4, total_steps=8, num_minibatches=1, update_epochs=1
+    )
+    result = make_train(
+        bindings.env, config, shaping_components=bindings.shaping_components
+    )(
+        jax.random.key(1),
+        bindings.body_params,
+        bindings.vehicle_params,
+    )
+    assert int(result.runner.train_state.step) == 1
+    assert int(result.metrics["env_steps"][-1]) == 8
+    assert np.isfinite(result.metrics["loss"]).all()
+    assert float(result.metrics["grad_norm"][0]) > 0
+
+
+@pytest.mark.parametrize(
+    "vy,vx,expected", [(0.9, 0.4, 1.0), (1.0, 0.4, 0.0), (0.9, 0.5, 0.0)]
+)
+def test_smoke_success_uses_terminal_info_thresholds(vy, vx, expected):
+    from train import evaluate_smoke
+
+    class InfoEnv(FakeEnv):
+        def step(self, state, action, key):
+            obs, state, components, done, info = super().step(state, action, key)
+            info.update(touchdown_v=jnp.asarray(vy), touchdown_vx=jnp.asarray(vx))
+            return obs, state, components, done, info
+
+    body, vehicle = parameters()
+    params = ActorCritic().init(jax.random.key(1), jnp.zeros(8))
+    summary = evaluate_smoke(
+        InfoEnv(horizon=3),
+        body,
+        vehicle,
+        params,
+        ObsStats.empty(),
+        seeds=(10000, 10001),
+    )
+    assert summary["soft_landing_rate"] == expected
+    assert summary["n_episodes"] == 2
+    assert summary["episode_steps_mean"] == 3
+    assert summary["reward_components_mean"]["alive"] == -0.75
+    assert summary["timeouts"] == 0
+
+
+def test_smoke_evaluation_rejects_unfinished_episodes():
+    from train import evaluate_smoke
+
+    body, vehicle = parameters()
+    params = ActorCritic().init(jax.random.key(1), jnp.zeros(8))
+    with pytest.raises(RuntimeError, match="before env termination"):
+        evaluate_smoke(
+            FakeEnv(horizon=3),
+            body,
+            vehicle,
+            params,
+            ObsStats.empty(),
+            seeds=(10000,),
+            max_steps=2,
+        )
