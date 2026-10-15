@@ -1,0 +1,32 @@
+# RLander vehicle configurations
+# Phase A: europa_lander only.
+#
+# Contract (§5.1): name, mass0_kg, dry_mass_kg, twr_max, min_throttle,
+#   isp_s, gimbal_limit_rad, cd, area_m2, h0_m, v0_mps
+#   derived: max_thrust_N = twr_max * mass0_kg * body.g  (computed at runtime)
+#
+# §6 values for europa_lander:
+#   mass0 800 kg, dry 320 kg, h0 2000 m, v0 ~20 m/s downward,
+#   twr_max 3.0, isp 300 s, gimbal ±15°, min_throttle 0.0,
+#   cd 1.2, area_m2 4.0 (unused in vacuum — modeling assumptions)
+
+europa_lander:
+  name: europa_lander
+  mass0_kg: 800.0
+  dry_mass_kg: 320.0
+  # Thrust-to-weight ratio (max_thrust = twr_max * mass0 * g)
+  twr_max: 3.0
+  # Phase A: throttle can go to zero
+  min_throttle: 0.0
+  # Specific impulse [s]
+  isp_s: 300.0
+  # Gimbal limit: ±15° in radians (assumption)
+  gimbal_limit_rad: 0.2618  # math.radians(15) ≈ 0.2618
+  # Drag coefficient (assumption; unused for vacuum bodies)
+  cd: 1.2
+  # Reference area [m²] (assumption; unused for vacuum bodies)
+  area_m2: 4.0
+  # Initial altitude [m]
+  h0_m: 2000.0
+  # Initial descent speed [m/s] (positive = downward)
+  v0_mps: 20.0
