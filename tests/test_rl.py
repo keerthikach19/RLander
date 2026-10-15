@@ -200,6 +200,55 @@ class ToyDescentEnv(FakeEnv):
         )
 
 
+class LearningDescentEnv(ToyDescentEnv):
+    """The same point-mass physics with randomized starts and state-based rewards.
+
+    Rewards measure descent velocity and touchdown, never distance to a target
+    action or a PD teacher. This is a small learning regression, not a claim
+    about the production reward or planetary soft-landing success.
+    """
+
+    def reset(self, key, body_params, vehicle_params):
+        _, state = super().reset(key, body_params, vehicle_params)
+        height_key, velocity_key = jax.random.split(key)
+        state.update(
+            y=vehicle_params["h0_m"]
+            * jax.random.uniform(
+                height_key,
+                (),
+                minval=0.9,
+                maxval=1.1,
+            ),
+            vx=jax.random.uniform(velocity_key, (), minval=-0.5, maxval=0.5),
+        )
+        return self.observe(state), state
+
+    def step(self, state, action, key):
+        obs, next_state, _, done, info = super().step(state, action, key)
+        target_vy = -jnp.minimum(
+            2.0,
+            jnp.sqrt(
+                0.5**2 + state["body_params"]["g"] * jnp.maximum(next_state["y"], 0)
+            ),
+        )
+        components = {
+            "descent_tracking": -0.01
+            * (
+                jnp.square(next_state["vy"] - target_vy)
+                + jnp.square(next_state["vx"])
+                + 0.1
+            ),
+            "touchdown": jnp.where(
+                done & ~info["truncated"],
+                5.0
+                - 2.0 * (jnp.square(next_state["vy"]) + jnp.square(next_state["vx"])),
+                0.0,
+            ),
+            "timeout": -5.0 * info["truncated"],
+        }
+        return obs, next_state, components, done, info
+
+
 def test_gaussian_and_observation_statistics():
     log_prob = gaussian_log_prob(
         jnp.zeros((2, 2)), jnp.zeros((2, 2)), jnp.zeros((2, 2))
@@ -345,6 +394,76 @@ def test_ppo_learns_simple_fake_control_task():
     assert error < 0.04, f"Learned deterministic action MSE: {error}"
     rewards = np.asarray(result.metrics["episode_return"])
     assert rewards[-5:].mean() > rewards[:5].mean() + 1.0
+
+
+def test_ppo_learns_toy_point_mass_descent():
+    """PPO must improve actual trajectory returns, not just an action bandit."""
+    env = LearningDescentEnv()
+    body, vehicle = parameters()
+    vehicle = dict(vehicle, h0_m=jnp.asarray(20.0), v0_mps=jnp.asarray(2.0))
+    config = PPOConfig(
+        num_envs=32,
+        num_steps=64,
+        total_steps=131_072,
+        num_minibatches=4,
+        update_epochs=4,
+        learning_rate=0.001,
+        ent_coef=0.001,
+    )
+    training_key = jax.random.key(7)
+    result = make_train(
+        env,
+        config,
+        shaping_components=("descent_tracking",),
+    )(training_key, body, vehicle)
+    # Reproduce the exact pre-optimization weights. Use the SAME normalization
+    # for both evaluations, so changing observation statistics alone cannot pass.
+    init_key = jax.random.split(training_key, 4)[1]
+    untrained_params = ActorCritic().init(init_key, jnp.zeros(8))
+
+    @jax.jit
+    def evaluate(params):
+        def episode(key):
+            key, reset_key = jax.random.split(key)
+            obs, state = env.reset(reset_key, body, vehicle)
+
+            def step(carry):
+                obs, state, key, total, _, steps = carry
+                key, step_key = jax.random.split(key)
+                action = policy_action(params, result.runner.obs_stats, obs)
+                obs, state, components, done, _ = env.step(state, action, step_key)
+                return (
+                    obs,
+                    state,
+                    key,
+                    total + sum(components.values()),
+                    done,
+                    steps + 1,
+                )
+
+            _, _, _, total, done, _ = jax.lax.while_loop(
+                lambda c: ~c[4] & (c[5] < 567),
+                step,
+                (obs, state, key, jnp.asarray(0.0), jnp.asarray(False), jnp.asarray(0)),
+            )
+            return total, done
+
+        return jax.vmap(episode)(jax.vmap(jax.random.key)(jnp.arange(10_000, 10_016)))
+
+    before, before_done = evaluate(untrained_params)
+    after, after_done = evaluate(result.runner.train_state.params)
+    before, after = np.asarray(before), np.asarray(after)
+    assert np.isfinite(result.metrics["loss"]).all()
+    assert np.isfinite(before).all() and np.isfinite(after).all()
+    assert np.asarray(before_done).all() and np.asarray(after_done).all()
+    # A substantial held-out gain is required; an unchanged/random policy fails.
+    improvement = float(after.mean() - before.mean())
+    required_gain = max(10.0, 0.25 * abs(float(before.mean())))
+    print(
+        f"Point-mass PPO return: {before.mean():.3f} -> {after.mean():.3f}; gain={improvement:.3f}"
+    )
+    assert improvement > required_gain, (before.mean(), after.mean(), required_gain)
+    assert np.count_nonzero(after > before) >= 12
 
 
 @pytest.mark.parametrize(
