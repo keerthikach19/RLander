@@ -25,7 +25,7 @@ from typing import Any, NamedTuple
 import jax
 import jax.numpy as jnp
 
-from env.dynamics import step_dynamics_euler
+from env.dynamics import step_dynamics_rk4
 from env.sensors import add_sensor_noise
 from env.terrain import terrain_height
 
@@ -204,8 +204,8 @@ class LanderEnv:
         # thrust angle: [-1,1] -> [-gimbal_limit, gimbal_limit]
         thrust_angle = raw_angle * state.gimbal_limit_rad
 
-        # --- Dynamics step (Euler for M1) ---
-        x_new, y_new, vx_new, vy_new, mass_new = step_dynamics_euler(
+        # --- Dynamics step (RK4 with 4 substeps per control step) ---
+        x_new, y_new, vx_new, vy_new, mass_new = step_dynamics_rk4(
             state.x, state.y, state.vx, state.vy, state.mass,
             throttle, thrust_angle, state.dt,
             state.g, state.max_thrust, state.isp_s,
