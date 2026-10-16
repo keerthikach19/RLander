@@ -11,6 +11,7 @@ Exact 50k smoke: +body=europa +vehicle=europa_lander +seed=1
 import hashlib
 import importlib
 import json
+import math
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -46,6 +47,8 @@ class TrainingBindings:
     record_run: Callable | None = None
     evaluate: Callable | None = None
     per_env_params: bool = False
+    reward_id: str | None = None
+    evaluation_config: dict | None = None
 
 
 def evaluate_smoke(
@@ -165,14 +168,39 @@ def lander_bindings(cfg):
     body = load_params("bodies.yaml", cfg.get("body", "europa"))
     vehicle = load_params("vehicles.yaml", cfg.get("vehicle", "europa_lander"))
     vehicle["max_thrust_N"] = vehicle["twr_max"] * vehicle["mass0_kg"] * body["g"]
+    reward_cfg = cfg.get("reward", {})
+    if set(reward_cfg) - {"mode", "potential_scale"}:
+        raise ValueError("reward accepts only mode and potential_scale; gamma uses PPO")
+    mode = reward_cfg.get("mode", "baseline")
+    if mode not in ("baseline", "potential_profile"):
+        raise ValueError("reward.mode must be baseline or potential_profile")
+    scale = float(reward_cfg.get("potential_scale", 20.0))
+    if not math.isfinite(scale) or scale < 0:
+        raise ValueError("reward.potential_scale must be finite and nonnegative")
+    gamma = float(cfg.get("ppo", {}).get("gamma", PPOConfig.gamma))
+    if not 0 <= gamma <= 1:
+        raise ValueError("PPO gamma must be in [0, 1]")
+    vehicle.update(
+        reward_mode=jnp.float32(mode == "potential_profile"),
+        reward_gamma=jnp.float32(gamma),
+        reward_potential_scale=jnp.float32(scale),
+    )
+    eval_cfg = cfg.get("evaluation", {})
+    seed_start = int(eval_cfg.get("seed_start", 10_000))
+    episodes = int(eval_cfg.get("episodes", 100))
+    if seed_start < 0 or episodes < 1 or seed_start + episodes > 2**32:
+        raise ValueError("Evaluation needs a nonempty uint32 seed range")
+    seeds = tuple(range(seed_start, seed_start + episodes))
     return TrainingBindings(
         LanderEnv(),
         body,
         vehicle,
         shaping_components=("velocity", "altitude", "fuel", "angle"),
         evaluate=lambda params, stats: evaluate_smoke(
-            LanderEnv(), body, vehicle, params, stats
+            LanderEnv(), body, vehicle, params, stats, seeds=seeds
         ),
+        reward_id=f"hand_shaped_{mode}_v1",
+        evaluation_config={"seed_start": seed_start, "episodes": episodes},
     )
 
 
@@ -208,6 +236,13 @@ def run_experiment(
         raise ValueError(
             "A full run requires a prior smoke_success_rate > 0.10 (and <= 1)"
         )
+    # The invariance argument requires the same discount in shaping and PPO.
+    # Validate here as callers may build bindings and PPOConfig independently.
+    if isinstance(bindings.vehicle_params, dict):
+        mode = np.asarray(bindings.vehicle_params.get("reward_mode", 0))
+        gamma = np.asarray(bindings.vehicle_params.get("reward_gamma", config.gamma))
+        if np.any((mode == 1) & ~np.isclose(gamma, config.gamma, rtol=0, atol=1e-7)):
+            raise ValueError("Potential reward_gamma must match PPO gamma")
     run_id = (
         f"ppo-{body_name}-{seed}-{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid4().hex[:8]}"
     )
@@ -226,6 +261,7 @@ def run_experiment(
             "shaping_components": bindings.shaping_components,
             "per_env_params": bindings.per_env_params,
             "smoke_success_rate": smoke_success_rate,
+            "evaluation": bindings.evaluation_config,
         }
     )
     config_json = json.dumps(run_config, sort_keys=True, allow_nan=False)
@@ -234,7 +270,7 @@ def run_experiment(
         "train_bodies_json": json.dumps([body_name]),
         "vehicle": vehicle_name,
         "policy_type": "ppo",
-        "reward_id": None,
+        "reward_id": bindings.reward_id,
         "seed": seed,
         "config_hash": hashlib.sha256(config_json.encode()).hexdigest(),
         "jax_version": jax.__version__,

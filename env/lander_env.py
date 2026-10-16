@@ -26,6 +26,7 @@ import jax
 import jax.numpy as jnp
 
 from env.dynamics import step_dynamics_euler
+from env.reward_shaping import profile_shaping
 from env.sensors import add_sensor_noise
 from env.terrain import terrain_height
 
@@ -71,6 +72,10 @@ class EnvState(NamedTuple):
     # --- success thresholds (from body config) ---
     vy_max_mps: jnp.ndarray
     vx_max_mps: jnp.ndarray
+    # Optional reward settings; numeric data, never part of the dynamics.
+    reward_mode: jnp.ndarray  # 0 baseline (default), 1 potential_profile
+    reward_gamma: jnp.ndarray
+    reward_potential_scale: jnp.ndarray
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +173,11 @@ class LanderEnv:
             min_throttle=min_throttle,
             cd=cd, area_m2=area_m2,
             vy_max_mps=vy_max_mps, vx_max_mps=vx_max_mps,
+            reward_mode=jnp.float32(vehicle_params.get("reward_mode", 0.0)),
+            reward_gamma=jnp.float32(vehicle_params.get("reward_gamma", 0.995)),
+            reward_potential_scale=jnp.float32(
+                vehicle_params.get("reward_potential_scale", 20.0)
+            ),
         )
 
         obs = _make_obs(state, k_noise)
@@ -261,6 +271,11 @@ class LanderEnv:
         w_v, w_h, w_f, w_theta = 1.0, 0.5, 0.1, 0.05
 
         r_velocity = -w_v * v_mag_nondim
+        r_velocity += jnp.where(
+            state.reward_mode == 1.0,
+            profile_shaping(state, y_new, vx_new, vy_new, terminated),
+            0.0,
+        )
         r_altitude = -w_h * h_nondim
         r_fuel = -w_f * throttle
         r_angle = -w_theta * angle_norm

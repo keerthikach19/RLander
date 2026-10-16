@@ -822,3 +822,157 @@ def test_optimizer_reward_scaling_keeps_original_episode_metrics():
     )
     with pytest.raises(ValueError, match="reward_scale"):
         PPOConfig(reward_scale=0)
+
+
+@pytest.mark.parametrize("ending", ["running", "landed", "crashed", "timeout"])
+def test_profile_mode_changes_only_velocity_reward(ending):
+    from env.lander_env import LanderEnv
+    from env.reward_shaping import descent_potential
+
+    body, vehicle = parameters()
+    _, state = LanderEnv.reset(jax.random.key(1), body, vehicle)
+    if ending in ("landed", "crashed"):
+        state = state._replace(
+            y=jnp.float32(0.01),
+            vx=jnp.float32(0),
+            vy=jnp.float32(-0.4 if ending == "landed" else -20),
+        )
+    elif ending == "timeout":
+        state = state._replace(t=state.t_max - state.dt / 2)
+    # Near-hover for the soft touchdown; identical action/noise for both modes.
+    action = jnp.array([2 * state.mass * state.g / state.max_thrust - 1, 0])
+    step = jax.jit(LanderEnv.step).lower(state, action, jax.random.key(2)).compile()
+    baseline = step(state, action, jax.random.key(2))
+    shaped_state = state._replace(reward_mode=jnp.float32(1))
+    shaped = step(shaped_state, action, jax.random.key(2))
+    obs, following, components, done, info = baseline
+    for left, right in ((obs, shaped[0]), (done, shaped[3]), (info, shaped[4])):
+        for a, b in zip(
+            jax.tree_util.tree_leaves(left), jax.tree_util.tree_leaves(right)
+        ):
+            np.testing.assert_array_equal(a, b)
+    for name in state._fields:
+        if name != "reward_mode":
+            np.testing.assert_array_equal(
+                getattr(following, name), getattr(shaped[1], name)
+            )
+    assert (
+        int(info["outcome"])
+        == {"running": 0, "landed": 1, "crashed": 2, "timeout": 3}[ending]
+    )
+    for name in components:
+        if name != "velocity":
+            np.testing.assert_array_equal(components[name], shaped[2][name])
+    np.testing.assert_allclose(
+        components["velocity"],
+        -jnp.hypot(following.vx, following.vy) / state.U,
+        rtol=1e-6,
+    )
+
+    def potential(s):
+        return descent_potential(s.y, s.vx, s.vy, s.g, s.U, s.reward_potential_scale)
+
+    next_potential = 0.0 if ending in ("landed", "crashed") else potential(following)
+    np.testing.assert_allclose(
+        shaped[2]["velocity"] - components["velocity"],
+        state.reward_gamma * next_potential - potential(state),
+        atol=2e-6,
+    )
+    assert float(components["landing"]) == (100.0 if ending == "landed" else 0)
+    assert float(components["crash"]) == (-100.0 if ending == "crashed" else 0)
+
+
+@pytest.mark.parametrize("truncated", [False, True])
+def test_profile_potential_preserves_discounted_return_and_bootstrapped_advantages(
+    truncated,
+):
+    gamma = 0.995
+    rewards = jnp.array([-0.8, -0.4, -100.0])
+    potentials = jnp.array([-4.0, -3.0, -6.0, -8.0 if truncated else 0.0])
+    shaping = gamma * potentials[1:] - potentials[:-1]
+    discounts = gamma ** jnp.arange(3)
+    # True terminal: constant offset. Timeout: retain the bootstrap boundary.
+    np.testing.assert_allclose(
+        jnp.dot(discounts, shaping),
+        -potentials[0] + gamma**3 * potentials[-1],
+        atol=2e-6,
+    )
+    values = jnp.array([-4.0, -5.0, -7.0, -9.0])
+    done = jnp.array([False, False, True])
+    timeouts = jnp.array([False, False, truncated])
+    base_advantage, base_returns = compute_gae(
+        rewards, values[:-1], values[1:], done, timeouts, gamma, 0.95
+    )
+    shaped_values = values - potentials
+    advantage, returns = compute_gae(
+        rewards + shaping,
+        shaped_values[:-1],
+        shaped_values[1:],
+        done,
+        timeouts,
+        gamma,
+        0.95,
+    )
+    np.testing.assert_allclose(advantage, base_advantage, atol=1e-5)
+    np.testing.assert_allclose(returns, base_returns - potentials[:-1], atol=1e-5)
+
+
+def test_europa_descent_profile_has_conservative_thrust_margin():
+    from env.reward_shaping import descent_reference
+
+    body, vehicle = parameters()
+    gravity = float(body["g"]) * 1.02
+    # Maximum randomized initial mass, minimum thrust, and full gimbal tilt.
+    available = (
+        float(vehicle["max_thrust_N"])
+        * 0.95
+        * np.cos(float(vehicle["gimbal_limit_rad"]))
+        / (float(vehicle["mass0_kg"]) * 1.05)
+        - gravity
+    )
+    heights = jnp.linspace(0, 2200, 1001)
+    speed = jax.vmap(lambda h: descent_reference(h, gravity))(heights)
+    slopes = jax.vmap(jax.grad(lambda h: descent_reference(h, gravity)))(heights)
+    demanded = speed * slopes  # dv/dt = (dv/dh) * dh/dt on the profile
+    assert float(demanded.max()) <= 0.5 * gravity + 1e-6
+    assert float(demanded.max()) < 0.4 * available
+    np.testing.assert_allclose(speed[0], -0.4)
+    assert np.all(speed < 0)  # profile never asks to hover
+
+
+def test_profile_configuration_and_gamma_mismatch_fail_before_training(tmp_path):
+    from omegaconf import OmegaConf
+
+    from train import lander_bindings, run_experiment
+
+    cfg = OmegaConf.create(
+        {"reward": {"mode": "potential_profile"}, "ppo": {"gamma": 0.98}}
+    )
+    bindings = lander_bindings(cfg)
+    assert bindings.reward_id == "hand_shaped_potential_profile_v1"
+    assert float(bindings.vehicle_params["reward_mode"]) == 1
+    np.testing.assert_allclose(bindings.vehicle_params["reward_gamma"], 0.98)
+    small = PPOConfig(num_envs=2, num_steps=2, total_steps=4, num_minibatches=1)
+    with pytest.raises(ValueError, match="match PPO gamma"):
+        run_experiment(bindings, small, output_root=tmp_path)
+    assert not list(tmp_path.iterdir())
+    for reward in ({"mode": "typo"}, {"potential_scale": -1}, {"gamma": 0.99}):
+        with pytest.raises(ValueError):
+            lander_bindings(OmegaConf.create({"reward": reward}))
+
+
+def test_profile_mode_runs_in_jitted_ppo():
+    from omegaconf import OmegaConf
+
+    from train import lander_bindings
+
+    cfg = OmegaConf.create({"reward": {"mode": "potential_profile"}})
+    bindings = lander_bindings(cfg)
+    config = PPOConfig(
+        num_envs=2, num_steps=4, total_steps=8, num_minibatches=1, update_epochs=1
+    )
+    result = make_train(bindings.env, config)(
+        jax.random.key(1), bindings.body_params, bindings.vehicle_params
+    )
+    assert np.isfinite(result.metrics["loss"]).all()
+    assert int(result.metrics["env_steps"][-1]) == 8

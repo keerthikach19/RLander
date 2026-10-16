@@ -19,9 +19,15 @@ from rl.networks import ObsStats
 from train import evaluate_smoke
 
 
-def diagnose(run_dir, *, seeds=tuple(range(10_000, 10_100))):
+def diagnose(run_dir, *, seeds=None):
     run_dir = Path(run_dir).resolve()
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    if seeds is None:
+        # Preserve a validation run's seed set rather than silently falling back
+        # to the frozen test set. Older manifests record seeds in their eval.
+        seeds = tuple(
+            manifest.get("evaluation", {}).get("seeds", range(10_000, 10_100))
+        )
     # Replay the run's recorded parameter data even if YAML configs later change.
     body, vehicle = jax.tree_util.tree_map(
         lambda value: jnp.asarray(value, dtype=jnp.float32),
