@@ -753,3 +753,72 @@ def test_smoke_evaluation_rejects_unfinished_episodes():
             seeds=(10000,),
             max_steps=2,
         )
+
+
+def test_descent_initialization_preserves_inference_and_produces_subhover_throttle():
+    from rl.networks import sample_action
+
+    network = ActorCritic(initial_action_mean=(-0.5, 0.0), initial_log_std=-1.0)
+    params = network.init(jax.random.key(1), jnp.zeros(8))
+    mean, log_std, _ = network.apply(params, jnp.zeros((8192, 8)))
+    np.testing.assert_allclose(mean[0], [-0.5, 0.0])
+    np.testing.assert_allclose(log_std[0], [-1.0, -1.0])
+    actions, _ = sample_action(jax.random.key(2), mean, log_std)
+    throttle = (jnp.clip(actions[:, 0], -1, 1) + 1) * 0.5
+    assert 0.24 < float(throttle.mean()) < 0.29  # below Europa's nominal 1/3 hover
+    np.testing.assert_allclose(
+        policy_action(params, ObsStats.empty(), jnp.zeros(8)), [-0.5, 0.0]
+    )
+    config = PPOConfig(initial_action_mean=[-0.5, 0.0], initial_log_std=-1.0)
+    assert config.initial_action_mean == (-0.5, 0.0)
+
+
+def test_smoke_evaluator_can_compare_pd_without_using_ppo_params():
+    from train import evaluate_smoke
+
+    body, vehicle = parameters()
+    result = evaluate_smoke(
+        FakeEnv(horizon=3),
+        body,
+        vehicle,
+        None,
+        None,
+        seeds=(10000,),
+        policy_fn=lambda obs: jnp.array([-0.5, 0.0]),
+        policy_label="fixed_control",
+    )
+    assert result["policy"] == "fixed_control"
+    assert result["soft_landing_rate"] == 1.0
+    assert np.asarray(result["episodes"]["final_observation"]).shape == (1, 8)
+
+
+def test_optimizer_reward_scaling_keeps_original_episode_metrics():
+    class LargeRewardEnv(FakeEnv):
+        def step(self, state, action, key):
+            obs, state, _, done, info = super().step(state, action, key)
+            return obs, state, {"terminal": -100.0 * done}, done, info
+
+    env = LargeRewardEnv(horizon=1)
+    body, vehicle = parameters()
+    common = {
+        "num_envs": 4,
+        "num_steps": 2,
+        "total_steps": 8,
+        "num_minibatches": 1,
+        "update_epochs": 1,
+    }
+    raw = make_train(env, PPOConfig(**common))(jax.random.key(1), body, vehicle)
+    scaled = make_train(env, PPOConfig(**common, reward_scale=0.01))(
+        jax.random.key(1), body, vehicle
+    )
+    np.testing.assert_allclose(scaled.metrics["episode_return"], -100.0)
+    np.testing.assert_array_equal(
+        scaled.metrics["reward_components"]["terminal"],
+        raw.metrics["reward_components"]["terminal"],
+    )
+    assert (
+        float(scaled.metrics["value_loss"][0])
+        < float(raw.metrics["value_loss"][0]) / 100
+    )
+    with pytest.raises(ValueError, match="reward_scale"):
+        PPOConfig(reward_scale=0)

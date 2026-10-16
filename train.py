@@ -57,6 +57,8 @@ def evaluate_smoke(
     *,
     seeds=tuple(range(10_000, 10_100)),
     max_steps=1024,
+    policy_fn=None,
+    policy_label="deterministic_mean",
 ):
     """Temporary W2 smoke summary until W3's evaluation pipeline is merged.
 
@@ -78,12 +80,16 @@ def evaluate_smoke(
         def step(carry):
             obs, state, key, _, count, totals, _ = carry
             key, step_key = jax.random.split(key)
-            action = policy_action(params, obs_stats, obs)
+            action = (
+                policy_action(params, obs_stats, obs)
+                if policy_fn is None
+                else policy_fn(obs)
+            )
             obs, state, components, done, info = env.step(state, action, step_key)
             totals = jax.tree_util.tree_map(jnp.add, totals, components)
             return obs, state, key, done, count + 1, totals, info
 
-        _, _, _, done, count, totals, info = jax.lax.while_loop(
+        final_obs, _, _, done, count, totals, info = jax.lax.while_loop(
             lambda c: ~c[3] & (c[4] < max_steps),
             step,
             (obs, state, key, jnp.asarray(False), jnp.asarray(0), totals, info),
@@ -101,6 +107,7 @@ def evaluate_smoke(
             "success": success,
             "info": info,
             "reward_components": totals,
+            "final_observation": final_obs,
         }
 
     episodes = jax.device_get(
@@ -116,7 +123,7 @@ def evaluate_smoke(
 
     return {
         "evaluation_type": "smoke",
-        "policy": "deterministic_mean",
+        "policy": policy_label,
         "seeds": list(seeds),
         "n_episodes": len(seeds),
         "soft_landings": int(episodes["success"].sum()),
@@ -128,6 +135,9 @@ def evaluate_smoke(
         "touchdown_abs_vx_mean_mps": contact_mean(np.abs(info["touchdown_vx"])),
         "fuel_used_mean_kg": float(np.mean(info["fuel_used"])),
         "episode_steps_mean": float(episodes["steps"].mean()),
+        "final_observed_height_over_L_mean": float(
+            episodes["final_observation"][:, 0].mean()
+        ),
         "reward_components_mean": {
             name: float(values.mean())
             for name, values in episodes["reward_components"].items()

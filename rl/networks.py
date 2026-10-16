@@ -12,6 +12,8 @@ from flax import struct
 
 class ActorCritic(nn.Module):
     action_dim: int = 2
+    initial_action_mean: tuple[float, float] = (0.0, 0.0)
+    initial_log_std: float = 0.0
 
     @nn.compact
     def __call__(self, obs):
@@ -34,6 +36,10 @@ class ActorCritic(nn.Module):
         mean = nn.Dense(
             self.action_dim,
             kernel_init=nn.initializers.orthogonal(0.01),
+            bias_init=lambda key, shape, dtype=jnp.float32: jnp.broadcast_to(
+                jnp.asarray(self.initial_action_mean, dtype=dtype),
+                shape,
+            ),
             name="actor_mean",
         )(actor)
         value = nn.Dense(
@@ -41,7 +47,11 @@ class ActorCritic(nn.Module):
             kernel_init=nn.initializers.orthogonal(1.0),
             name="critic_value",
         )(critic)[..., 0]
-        log_std = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
+        log_std = self.param(
+            "log_std",
+            nn.initializers.constant(self.initial_log_std),
+            (self.action_dim,),
+        )
         return mean, jnp.broadcast_to(log_std, mean.shape), value
 
 

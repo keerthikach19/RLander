@@ -5,6 +5,7 @@ bootstrap from the final observation; GAE never leaks across episode resets.
 Observation statistics are frozen during each rollout and its optimization.
 """
 
+import math
 from dataclasses import dataclass
 
 import jax
@@ -39,8 +40,22 @@ class PPOConfig:
     ent_coef: float = 0.01
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
+    initial_action_mean: tuple[float, float] = (0.0, 0.0)
+    initial_log_std: float = 0.0
+    reward_scale: float = 1.0
 
     def __post_init__(self):
+        object.__setattr__(self, "initial_action_mean", tuple(self.initial_action_mean))
+        if len(self.initial_action_mean) != 2 or any(
+            not math.isfinite(x) or not -1 <= x <= 1 for x in self.initial_action_mean
+        ):
+            raise ValueError(
+                "initial_action_mean must contain two finite values in [-1, 1]"
+            )
+        if not math.isfinite(self.initial_log_std):
+            raise ValueError("initial_log_std must be finite")
+        if not math.isfinite(self.reward_scale) or self.reward_scale <= 0:
+            raise ValueError("reward_scale must be finite and positive")
         for name in (
             "num_envs",
             "num_steps",
@@ -155,7 +170,10 @@ def make_train(env, config=None, *, shaping_components=(), per_env_params=False)
     Only aggregate per-update diagnostics leave the compiled training loop.
     """
     config = PPOConfig() if config is None else config
-    network = ActorCritic()
+    network = ActorCritic(
+        initial_action_mean=config.initial_action_mean,
+        initial_log_std=config.initial_log_std,
+    )
     updates_per_rollout = config.num_minibatches * config.update_epochs
 
     def learning_rate(count):
@@ -272,7 +290,9 @@ def make_train(env, config=None, *, shaping_components=(), per_env_params=False)
                 rollout, runner, None, length=config.num_steps
             )
             advantages, returns = compute_gae(
-                rollout_data["reward"],
+                # Uniform optimizer scaling preserves reward preferences. Logs
+                # and evaluation retain the original sum of named components.
+                rollout_data["reward"] * config.reward_scale,
                 rollout_data["value"],
                 rollout_data["next_value"],
                 rollout_data["done"],
