@@ -1,0 +1,139 @@
+{
+  "run_id": "ppo-europa-1-20261017T181600-140a790c",
+  "policies": {
+    "PPO": [
+      {
+        "seed": 2000,
+        "outcome": "crash",
+        "duration_s": 42.55690383911133,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -77.79613494873047,
+        "final_vx_mps": -1.3217082023620605,
+        "last_20s_altitude_range_m": [
+          0.0,
+          1250.12255859375
+        ],
+        "last_20s_mean_abs_vy_mps": 64.96959686279297
+      },
+      {
+        "seed": 2001,
+        "outcome": "crash",
+        "duration_s": 39.851417541503906,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -74.58322143554688,
+        "final_vx_mps": 1.883347988128662,
+        "last_20s_altitude_range_m": [
+          0.0,
+          1223.6160888671875
+        ],
+        "last_20s_mean_abs_vy_mps": 61.50243377685547
+      },
+      {
+        "seed": 2002,
+        "outcome": "crash",
+        "duration_s": 39.82317352294922,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -76.29566192626953,
+        "final_vx_mps": -0.4909496307373047,
+        "last_20s_altitude_range_m": [
+          0.0,
+          1231.2320556640625
+        ],
+        "last_20s_mean_abs_vy_mps": 63.00922775268555
+      },
+      {
+        "seed": 2003,
+        "outcome": "crash",
+        "duration_s": 44.56488800048828,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -77.49114990234375,
+        "final_vx_mps": 0.01976156234741211,
+        "last_20s_altitude_range_m": [
+          0.0,
+          1258.718505859375
+        ],
+        "last_20s_mean_abs_vy_mps": 64.48832702636719
+      },
+      {
+        "seed": 2004,
+        "outcome": "crash",
+        "duration_s": 44.099632263183594,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -73.76002502441406,
+        "final_vx_mps": 0.1057891845703125,
+        "last_20s_altitude_range_m": [
+          0.0,
+          1202.2469482421875
+        ],
+        "last_20s_mean_abs_vy_mps": 61.067771911621094
+      }
+    ],
+    "PD": [
+      {
+        "seed": 2000,
+        "outcome": "soft landing",
+        "duration_s": 92.34062194824219,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.7925093770027161,
+        "final_vx_mps": -0.04607833921909332,
+        "last_20s_altitude_range_m": [
+          0.0,
+          133.28237915039062
+        ],
+        "last_20s_mean_abs_vy_mps": 6.787693023681641
+      },
+      {
+        "seed": 2001,
+        "outcome": "soft landing",
+        "duration_s": 88.13289642333984,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.5443439483642578,
+        "final_vx_mps": -0.035046402364969254,
+        "last_20s_altitude_range_m": [
+          0.0,
+          135.35211181640625
+        ],
+        "last_20s_mean_abs_vy_mps": 6.7960076332092285
+      },
+      {
+        "seed": 2002,
+        "outcome": "soft landing",
+        "duration_s": 88.45320129394531,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.29228025674819946,
+        "final_vx_mps": 0.07622223347425461,
+        "last_20s_altitude_range_m": [
+          0.0,
+          132.61314392089844
+        ],
+        "last_20s_mean_abs_vy_mps": 6.665699005126953
+      },
+      {
+        "seed": 2003,
+        "outcome": "soft landing",
+        "duration_s": 93.14490509033203,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.3000195026397705,
+        "final_vx_mps": 0.07063542306423187,
+        "last_20s_altitude_range_m": [
+          0.0,
+          137.48980712890625
+        ],
+        "last_20s_mean_abs_vy_mps": 6.989119052886963
+      },
+      {
+        "seed": 2004,
+        "outcome": "soft landing",
+        "duration_s": 92.53031921386719,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.28575652837753296,
+        "final_vx_mps": 0.025815775617957115,
+        "last_20s_altitude_range_m": [
+          0.0,
+          125.5793685913086
+        ],
+        "last_20s_mean_abs_vy_mps": 6.381526470184326
+      }
+    ]
+  }
+}

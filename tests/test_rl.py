@@ -976,3 +976,36 @@ def test_profile_mode_runs_in_jitted_ppo():
     )
     assert np.isfinite(result.metrics["loss"]).all()
     assert int(result.metrics["env_steps"][-1]) == 8
+
+
+def test_trajectory_recording_matches_evaluation_and_stops_at_contact():
+    from omegaconf import OmegaConf
+
+    from rl.plot_trajectories import collect_trajectories
+    from train import evaluate_smoke, lander_bindings
+
+    bindings = lander_bindings(OmegaConf.create({}))
+    policy = lambda obs: jnp.array([-1.0, 0.0])
+    seeds = (2000, 2001)
+    rows = collect_trajectories(
+        bindings.body_params, bindings.vehicle_params, policy, seeds
+    )
+    evaluation = evaluate_smoke(
+        bindings.env, bindings.body_params, bindings.vehicle_params,
+        None, None, seeds=seeds, policy_fn=policy,
+    )["episodes"]
+    for index, row in enumerate(rows):
+        trace = row["trace"]
+        assert row["outcome"] == evaluation["info"]["outcome"][index] == 2
+        assert len(trace) == evaluation["steps"][index] + 1
+        assert trace[0, 0] == 0
+        assert np.all(np.diff(trace[:, 0]) > 0)
+        assert np.all(trace[:-1, 1] > 0)
+        assert trace[-1, 1] == 0
+        np.testing.assert_allclose(
+            abs(trace[-1, 2]), evaluation["info"]["touchdown_v"][index], rtol=1e-5
+        )
+    with pytest.raises(RuntimeError, match="before termination"):
+        collect_trajectories(
+            bindings.body_params, bindings.vehicle_params, policy, seeds, max_steps=1
+        )
