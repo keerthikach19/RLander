@@ -292,3 +292,48 @@ def test_multi_step_chain(europa_body, europa_vehicle):
         assert isinstance(state, EnvState)
         if done:
             break
+
+
+# ---------------------------------------------------------------------------
+# Test 14: reward shaping hook (w2-rl optional potential profile)
+# ---------------------------------------------------------------------------
+def test_reward_shaping_hook(europa_body, europa_vehicle):
+    """Potential profile reward modifies only velocity component when enabled."""
+    from env.reward_shaping import descent_potential
+
+    key = jax.random.PRNGKey(42)
+    step_key = jax.random.PRNGKey(101)
+    action = jnp.array([0.0, 0.0])
+
+    # Baseline (default)
+    _, state_base = LanderEnv.reset(key, europa_body, europa_vehicle)
+    obs_b, next_state_b, comps_b, done_b, info_b = LanderEnv.step(state_base, action, step_key)
+
+    # Potential profile mode
+    vehicle_shaped = dict(europa_vehicle, reward_mode=1.0, reward_gamma=0.995, reward_potential_scale=20.0)
+    _, state_shaped = LanderEnv.reset(key, europa_body, vehicle_shaped)
+    obs_s, next_state_s, comps_s, done_s, info_s = LanderEnv.step(state_shaped, action, step_key)
+
+    # Dynamics, observation, done, info must be identical
+    assert jnp.allclose(obs_b, obs_s)
+    assert jnp.allclose(next_state_b.y, next_state_s.y)
+    assert done_b == done_s
+    assert info_b["outcome"] == info_s["outcome"]
+
+    # Non-velocity components must be identical
+    for k in comps_b:
+        if k != "velocity":
+            assert jnp.allclose(comps_b[k], comps_s[k]), f"Component {k} differed"
+
+    # Velocity component should differ by gamma * Phi(s') - Phi(s)
+    phi_prev = descent_potential(
+        state_shaped.y, state_shaped.vx, state_shaped.vy,
+        state_shaped.g, state_shaped.U, state_shaped.reward_potential_scale
+    )
+    phi_next = descent_potential(
+        next_state_s.y, next_state_s.vx, next_state_s.vy,
+        state_shaped.g, state_shaped.U, state_shaped.reward_potential_scale
+    )
+    expected_delta = state_shaped.reward_gamma * phi_next - phi_prev
+    assert jnp.allclose(comps_s["velocity"] - comps_b["velocity"], expected_delta, atol=1e-5)
+

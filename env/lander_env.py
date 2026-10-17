@@ -26,6 +26,7 @@ import jax
 import jax.numpy as jnp
 
 from env.dynamics import step_dynamics_rk4
+from env.reward_shaping import profile_shaping
 from env.sensors import add_sensor_noise
 from env.terrain import terrain_height
 from env.reward_shaping import profile_shaping

@@ -1,4 +1,4 @@
-﻿"""storage/parquet_io.py — Parquet trajectory I/O for RLander (W3, §8).
+"""storage/parquet_io.py — Parquet trajectory I/O for RLander (W3, §8).
 
 Schema per PLAN.md §8:
     Trajectory file: data/trajectories/{run_id}/{seed}.parquet
@@ -65,7 +65,10 @@ def trajectory_path(run_id: int, seed: int, base_dir: str | None = None) -> str:
 
 
 def _abs_path(rel_path: str) -> Path:
-    return _REPO_ROOT / rel_path
+    p = Path(rel_path)
+    if p.is_absolute():
+        return p
+    return _REPO_ROOT / p
 
 
 # ---------------------------------------------------------------------------

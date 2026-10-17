@@ -1,4 +1,4 @@
-﻿"""storage/db.py — SQLite database helpers for RLander (W3, §8).
+"""storage/db.py — SQLite database helpers for RLander (W3, §8).
 
 Design rules:
 - Uses SQLAlchemy Core (not ORM) with a plain sqlite:// URL.
@@ -103,6 +103,39 @@ def upsert_vehicle(
     conn.commit()
 
 
+def get_body(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
+    """Return the body config dict, or None if not found."""
+    row = conn.execute("SELECT * FROM bodies WHERE name = ?", (name,)).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    d["config"] = json.loads(d.pop("config_json"))
+    d["source_urls"] = json.loads(d.pop("source_urls_json"))
+    return d
+
+
+def get_all_bodies(conn: sqlite3.Connection) -> list[str]:
+    """Return all body names registered in the DB."""
+    rows = conn.execute("SELECT name FROM bodies ORDER BY name").fetchall()
+    return [row["name"] for row in rows]
+
+
+def get_vehicle(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
+    """Return the vehicle config dict, or None if not found."""
+    row = conn.execute("SELECT * FROM vehicles WHERE name = ?", (name,)).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    d["config"] = json.loads(d.pop("config_json"))
+    return d
+
+
+def get_all_vehicles(conn: sqlite3.Connection) -> list[str]:
+    """Return all vehicle names registered in the DB."""
+    rows = conn.execute("SELECT name FROM vehicles ORDER BY name").fetchall()
+    return [row["name"] for row in rows]
+
+
 # ---------------------------------------------------------------------------
 # runs
 # ---------------------------------------------------------------------------
@@ -150,6 +183,17 @@ def get_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
     d = dict(row)
     d["train_bodies"] = json.loads(d.pop("train_bodies_json"))
     return d
+
+
+def get_runs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return all run rows as a list of dicts."""
+    rows = conn.execute("SELECT * FROM runs ORDER BY id ASC").fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["train_bodies"] = json.loads(d.pop("train_bodies_json"))
+        result.append(d)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +257,41 @@ def get_evals_for_run(
         d["term_stats"] = json.loads(d.pop("term_stats_json"))
         result.append(d)
     return result
+
+
+def get_all_evals(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return all eval rows."""
+    rows = conn.execute("SELECT * FROM evals ORDER BY id ASC").fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["term_stats"] = json.loads(d.pop("term_stats_json"))
+        result.append(d)
+    return result
+
+
+def get_best_run_for_body(
+    conn: sqlite3.Connection, body_name: str
+) -> dict[str, Any] | None:
+    """Return the eval and run dict with highest success_rate on body_name."""
+    row = conn.execute(
+        """
+        SELECT e.*, r.vehicle, r.policy_type, r.seed as run_seed,
+               r.train_bodies_json, r.checkpoint_path, r.config_hash, r.jax_version
+        FROM evals e
+        JOIN runs r ON e.run_id = r.id
+        WHERE e.eval_body = ?
+        ORDER BY e.success_rate DESC, e.vy_mean ASC, e.fuel_mean DESC, e.id DESC
+        LIMIT 1
+        """,
+        (body_name,),
+    ).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    d["term_stats"] = json.loads(d.pop("term_stats_json"))
+    d["train_bodies"] = json.loads(d.pop("train_bodies_json"))
+    return d
 
 
 # ---------------------------------------------------------------------------
