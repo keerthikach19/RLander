@@ -1,4 +1,4 @@
-﻿"""tests/test_w3.py — W3 Milestone 1 tests (eval/metrics.py, storage/db.py,
+"""tests/test_w3.py — W3 Milestone 1 tests (eval/metrics.py, storage/db.py,
 storage/parquet_io.py).
 
 Tests run against fake info dicts (no env import required), so this file
@@ -11,9 +11,11 @@ All tests use :memory: for SQLite and tmp_path for Parquet I/O.
 
 from __future__ import annotations
 
+import json
 import math
-import sys
 import os
+import sqlite3
+import sys
 import tempfile
 from pathlib import Path
 
@@ -36,9 +38,16 @@ from eval.metrics import (
     OUTCOME_TIMEOUT,
 )
 from storage.db import (
-    get_evals_for_run,
+    get_all_bodies,
+    get_all_evals,
+    get_all_vehicles,
+    get_best_run_for_body,
+    get_body,
     get_episodes_for_run,
+    get_evals_for_run,
     get_run,
+    get_runs,
+    get_vehicle,
     init_db,
     insert_episode,
     insert_eval,
@@ -52,6 +61,17 @@ from storage.parquet_io import (
     read_trajectory,
     trajectory_path,
     write_trajectory,
+)
+from eval.run_eval import (
+    load_body_config,
+    load_vehicle_config,
+    main as run_eval_main,
+    make_policy_fn,
+    run_evaluation,
+)
+from scripts.export_demo_data import (
+    export_demo_data,
+    main as export_demo_main,
 )
 
 
@@ -501,3 +521,389 @@ class TestParquetIO:
                 )
         finally:
             pio._REPO_ROOT = orig_root
+
+
+# ===========================================================================
+# 6. eval/run_eval.py — Deterministic Evaluation Runner
+# ===========================================================================
+
+class TestRunEval:
+    @pytest.fixture
+    def eval_setup(self, tmp_path):
+        """Prepare an isolated SQLite DB and trajectory dir for eval tests."""
+        import storage.parquet_io as pio
+        orig_root = pio._REPO_ROOT
+        pio._REPO_ROOT = tmp_path
+
+        db_path = tmp_path / "test_rlander.db"
+        conn = init_db(db_path)
+
+        body_cfg = load_body_config("europa")
+        vehicle_cfg = load_vehicle_config("europa_lander")
+        upsert_body(conn, "europa", body_cfg)
+        upsert_vehicle(conn, "europa_lander", vehicle_cfg)
+
+        run_id = insert_run(
+            conn,
+            train_bodies=["europa"],
+            vehicle="europa_lander",
+            policy_type="pd_fallback",
+            seed=1,
+            checkpoint_path=None,
+        )
+
+        yield conn, db_path, run_id, tmp_path
+
+        conn.close()
+        pio._REPO_ROOT = orig_root
+
+    def test_exact_determinism_same_seed(self, eval_setup):
+        """Same seed must produce bitwise identical trajectories and outcomes."""
+        conn, db_path, run_id, tmp_path = eval_setup
+        seed = 10042
+
+        res1 = run_evaluation(
+            run_id=run_id,
+            conn=conn,
+            seeds=[seed],
+            traj_base_dir="trajectories_run1",
+            quiet=True,
+        )
+        res2 = run_evaluation(
+            run_id=run_id,
+            conn=conn,
+            seeds=[seed],
+            traj_base_dir="trajectories_run2",
+            quiet=True,
+        )
+
+        assert res1["success_rate"] == res2["success_rate"]
+        assert res1["vy_mean"] == res2["vy_mean"]
+        assert res1["fuel_mean"] == res2["fuel_mean"]
+
+        # Read both trajectories and check all step floats are identical
+        traj1 = read_trajectory(res1["episodes"][0]["parquet_path"])
+        traj2 = read_trajectory(res2["episodes"][0]["parquet_path"])
+        assert len(traj1) == len(traj2)
+        for s1, s2 in zip(traj1, traj2):
+            for col in ["t", "x", "y", "vx", "vy", "mass", "throttle", "angle", "reward"]:
+                assert s1[col] == s2[col], f"Mismatch in column {col}"
+
+    def test_pd_fallback_evaluation_contract(self, eval_setup):
+        """PD fallback evaluation computes Wilson CI, touchdown stats, writes SQLite and Parquet."""
+        conn, db_path, run_id, tmp_path = eval_setup
+        seeds = range(10000, 10010)  # 10 episodes
+
+        result = run_evaluation(
+            run_id=run_id,
+            conn=conn,
+            seeds=seeds,
+            quiet=True,
+        )
+
+        assert result["run_id"] == run_id
+        assert result["eval_body"] == "europa"
+        assert result["n_episodes"] == 10
+        assert 0.0 <= result["success_rate"] <= 1.0
+        assert 0.0 <= result["ci95_low"] <= result["success_rate"]
+        assert result["success_rate"] <= result["ci95_high"] <= 1.0
+        assert result["vy_mean"] >= 0.0
+        assert result["fuel_mean"] > 0.0
+
+        # Check SQLite evals table
+        evals = conn.execute("SELECT * FROM evals WHERE run_id = ?", (run_id,)).fetchall()
+        assert len(evals) == 1
+        e = dict(evals[0])
+        assert e["n_episodes"] == 10
+        assert abs(e["success_rate"] - result["success_rate"]) < 1e-6
+        assert abs(e["ci95_low"] - result["ci95_low"]) < 1e-6
+        assert abs(e["ci95_high"] - result["ci95_high"]) < 1e-6
+
+        # Check SQLite episodes table and Parquet files
+        episodes = conn.execute("SELECT * FROM episodes WHERE run_id = ?", (run_id,)).fetchall()
+        assert len(episodes) == 10
+        for ep in episodes:
+            p_path = ep["parquet_path"]
+            steps = read_trajectory(p_path)
+            assert len(steps) > 1
+            meta = get_parquet_metadata(p_path)
+            assert meta["num_rows"] == len(steps)
+            assert set(meta["schema"]) == {
+                "t", "x", "y", "vx", "vy", "mass", "throttle", "angle", "reward"
+            }
+
+    def test_random_policy_stand_in(self, eval_setup):
+        """Random policy stand-in runs deterministically and records crashes/outcomes."""
+        conn, db_path, run_id, tmp_path = eval_setup
+
+        result = run_evaluation(
+            run_id=run_id,
+            policy_override="random",
+            conn=conn,
+            seeds=[10001, 10002],
+            quiet=True,
+        )
+
+        assert result["n_episodes"] == 2
+        assert len(result["episodes"]) == 2
+        for ep in result["episodes"]:
+            assert ep["outcome"] in [0, 1, 2, 3]
+            steps = read_trajectory(ep["parquet_path"])
+            assert len(steps) > 0
+
+    def test_checkpoint_stand_in(self, eval_setup):
+        """A restored Orbax checkpoint stand-in executes deterministic policy actions."""
+        conn, db_path, run_id, tmp_path = eval_setup
+        import orbax.checkpoint as ocp
+        from flax import serialization
+        import jax
+        import jax.numpy as jnp
+        from rl.networks import ActorCritic, ObsStats
+
+        # Create dummy network and stats
+        net = ActorCritic()
+        params = net.init(jax.random.key(42), jnp.zeros(8))
+        stats = ObsStats.empty(8)
+
+        ckpt_dir = tmp_path / "test_checkpoint"
+        with ocp.PyTreeCheckpointer() as checkpointer:
+            checkpointer.save(
+                str(ckpt_dir),
+                {
+                    "train_state": {"params": serialization.to_state_dict(params)},
+                    "obs_stats": serialization.to_state_dict(stats),
+                },
+            )
+
+        ckpt_run_id = insert_run(
+            conn,
+            train_bodies=["europa"],
+            vehicle="europa_lander",
+            policy_type="ppo",
+            seed=42,
+            checkpoint_path=str(ckpt_dir),
+        )
+
+        result = run_evaluation(
+            run_id=ckpt_run_id,
+            conn=conn,
+            seeds=[10005],
+            quiet=True,
+        )
+
+        assert result["run_id"] == ckpt_run_id
+        assert result["n_episodes"] == 1
+        steps = read_trajectory(result["episodes"][0]["parquet_path"])
+        assert len(steps) > 1
+
+    def test_ood_evaluation_mars(self, eval_setup):
+        """Evaluation on a different body (Mars OOD) loads Mars config and succeeds."""
+        conn, db_path, run_id, tmp_path = eval_setup
+
+        result = run_evaluation(
+            run_id=run_id,
+            eval_body="mars",
+            conn=conn,
+            seeds=[10000],
+            quiet=True,
+        )
+
+        assert result["eval_body"] == "mars"
+        assert result["is_ood"] is True
+        # Verify Mars was upserted into bodies table
+        body = get_body(conn, "mars")
+        assert body is not None
+        assert body["config"]["g"] == 3.71
+
+    def test_frozen_100_seeds(self, eval_setup):
+        """Full 100 frozen-seed run (10000..10099) verifies n_episodes=100 and Wilson CI."""
+        conn, db_path, run_id, tmp_path = eval_setup
+
+        result = run_evaluation(
+            run_id=run_id,
+            conn=conn,
+            seeds=range(10000, 10100),
+            quiet=True,
+        )
+
+        assert result["n_episodes"] == 100
+        assert len(result["episodes"]) == 100
+        # Wilson score interval width should be well-behaved
+        assert result["ci95_high"] - result["ci95_low"] <= 0.35
+
+    def test_run_eval_cli(self, eval_setup):
+        """run_eval CLI entry point parses args and runs evaluation."""
+        conn, db_path, run_id, tmp_path = eval_setup
+
+        run_eval_main([
+            "--run-id", str(run_id),
+            "--db-path", str(db_path),
+            "--seeds-start", "10000",
+            "--num-episodes", "2",
+            "--quiet",
+        ])
+
+        evals = conn.execute("SELECT * FROM evals WHERE run_id = ?", (run_id,)).fetchall()
+        assert len(evals) >= 1
+
+
+# ===========================================================================
+# 7. scripts/export_demo_data.py — Curated Demo Snapshot Export
+# ===========================================================================
+
+class TestExportDemoData:
+    @pytest.fixture
+    def demo_setup(self, tmp_path):
+        import storage.parquet_io as pio
+        orig_root = pio._REPO_ROOT
+        pio._REPO_ROOT = tmp_path
+
+        src_db_path = tmp_path / "data" / "rlander.db"
+        src_conn = init_db(src_db_path)
+
+        body_cfg = load_body_config("europa")
+        vehicle_cfg = load_vehicle_config("europa_lander")
+        upsert_body(src_conn, "europa", body_cfg)
+        upsert_vehicle(src_conn, "europa_lander", vehicle_cfg)
+
+        # Run 1: lower success rate (40%)
+        run1_id = insert_run(
+            src_conn,
+            train_bodies=["europa"],
+            vehicle="europa_lander",
+            policy_type="ppo",
+            seed=1,
+        )
+        insert_eval(
+            src_conn,
+            run_id=run1_id,
+            eval_body="europa",
+            n_episodes=10,
+            success_rate=0.40,
+            vy_mean=0.8,
+            vy_std=0.2,
+            vx_mean=0.3,
+            vx_std=0.1,
+            fuel_mean=120.0,
+            ci95_low=0.2,
+            ci95_high=0.6,
+        )
+
+        # Run 2: best run (90%)
+        run2_id = insert_run(
+            src_conn,
+            train_bodies=["europa"],
+            vehicle="europa_lander",
+            policy_type="ppo",
+            seed=2,
+        )
+        insert_eval(
+            src_conn,
+            run_id=run2_id,
+            eval_body="europa",
+            n_episodes=10,
+            success_rate=0.90,
+            vy_mean=0.4,
+            vy_std=0.1,
+            vx_mean=0.1,
+            vx_std=0.05,
+            fuel_mean=95.0,
+            ci95_low=0.75,
+            ci95_high=0.98,
+        )
+
+        # Create dummy trajectories and episode records for run 2
+        for seed in range(10000, 10015):
+            rel_path = f"data/trajectories/{run2_id}/{seed}.parquet"
+            write_trajectory([_fake_step(t=0.0), _fake_step(t=1.0)], rel_path)
+            insert_episode(
+                src_conn,
+                run_id=run2_id,
+                seed=seed,
+                outcome=OUTCOME_LANDED if seed % 2 == 0 else OUTCOME_CRASHED,
+                parquet_path=rel_path,
+            )
+
+        src_conn.close()
+        yield src_db_path, tmp_path, run2_id
+
+        pio._REPO_ROOT = orig_root
+
+    def test_export_picks_best_run(self, demo_setup):
+        """export_demo_data selects the highest success_rate run and exports ~10 episodes."""
+        src_db_path, tmp_path, best_run_id = demo_setup
+        out_dir = tmp_path / "app" / "demo_data"
+
+        manifest = export_demo_data(
+            source_db_path=src_db_path,
+            output_dir=out_dir,
+            num_episodes_per_body=10,
+            quiet=True,
+        )
+
+        assert "europa" in manifest["bodies"]
+        europa_meta = manifest["bodies"]["europa"]
+        assert europa_meta["run_id"] == best_run_id
+        assert europa_meta["success_rate"] == 0.90
+        assert europa_meta["num_episodes"] == 10
+
+        # Check demo SQLite DB
+        demo_db = out_dir / "rlander.db"
+        assert demo_db.exists()
+        d_conn = sqlite3.connect(str(demo_db))
+        d_conn.row_factory = sqlite3.Row
+        runs = d_conn.execute("SELECT * FROM runs").fetchall()
+        assert len(runs) == 1
+        assert runs[0]["id"] == best_run_id
+
+        evals = d_conn.execute("SELECT * FROM evals").fetchall()
+        assert len(evals) == 1
+        assert evals[0]["run_id"] == best_run_id
+        assert evals[0]["success_rate"] == 0.90
+
+        episodes = d_conn.execute("SELECT * FROM episodes").fetchall()
+        assert len(episodes) == 10
+
+        # Check that Parquet files were copied
+        for ep in episodes:
+            p = out_dir / "trajectories" / str(best_run_id) / f"{ep['seed']}.parquet"
+            assert p.exists()
+            steps = read_trajectory(str(p))
+            assert len(steps) == 2
+
+        d_conn.close()
+
+        # Check manifest.json
+        manifest_file = out_dir / "manifest.json"
+        assert manifest_file.exists()
+        data = json.loads(manifest_file.read_text(encoding="utf-8"))
+        assert "europa" in data["bodies"]
+
+    def test_export_empty_db_handles_gracefully(self, tmp_path):
+        """Exporting an empty database returns empty status without crashing."""
+        empty_db = tmp_path / "empty.db"
+        conn = init_db(empty_db)
+        conn.close()
+
+        res = export_demo_data(
+            source_db_path=empty_db,
+            output_dir=tmp_path / "demo_out",
+            quiet=True,
+        )
+        assert res["status"] == "empty"
+
+    def test_export_cli(self, demo_setup):
+        """export_demo_data CLI entry point parses args and runs export."""
+        src_db_path, tmp_path, best_run_id = demo_setup
+        out_dir = tmp_path / "cli_demo"
+
+        export_demo_main([
+            "--db-path", str(src_db_path),
+            "--output-dir", str(out_dir),
+            "--num-episodes", "5",
+            "--quiet",
+        ])
+
+        assert (out_dir / "manifest.json").exists()
+        assert (out_dir / "rlander.db").exists()
+
