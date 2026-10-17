@@ -12,7 +12,7 @@ europa:
   # Surface gravity: 1.315 m/s^2
   g: 1.315
   # Mean radius: 1560.8 km
-  # Source: https://nssdc.gsfc.nasa.gov/planetary/factsheet/europafact.html
+  # Source: https://nssdc.gsfc.nasa.gov/planetary/factsheet/europafact.html 
   radius_m: 1560800.0
   # Europa has no atmosphere (vacuum body)
   rho0: 0.0
