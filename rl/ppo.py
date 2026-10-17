@@ -20,6 +20,7 @@ from rl.networks import (
     gaussian_entropy,
     gaussian_log_prob,
     normalize_obs,
+    replace_actor,
     sample_action,
     update_obs_stats,
 )
@@ -162,12 +163,14 @@ def ppo_loss(params, apply_fn, batch, config):
 
 
 def make_train(env, config=None, *, shaping_components=(), per_env_params=False):
-    """Build train(key, body_params, vehicle_params) -> TrainResult.
+    """Build train(key, body, vehicle, actor_init=None, obs_stats_init=None).
 
     Numeric parameter pytrees are data arguments (shared by default, or batched
     on axis 0 with per_env_params=True). Component names are supplied explicitly
     by the caller: the env contract does not prescribe reward dictionary keys.
     Only aggregate per-update diagnostics leave the compiled training loop.
+    Optional initialization imports only the actor MLP and paired normalization;
+    critic, log-std, optimizer, RNG, and environments are initialized fresh.
     """
     config = PPOConfig() if config is None else config
     network = ActorCritic(
@@ -185,7 +188,9 @@ def make_train(env, config=None, *, shaping_components=(), per_env_params=False)
         optax.adam(learning_rate, eps=1e-5),
     )
 
-    def train(key, body_params, vehicle_params):
+    def train(key, body_params, vehicle_params, actor_init=None, obs_stats_init=None):
+        if (actor_init is None) != (obs_stats_init is None):
+            raise ValueError("Actor init and its observation statistics must be paired")
         key, init_key, reset_key, shape_key = jax.random.split(key, 4)
         obs, env_state = reset_envs(
             env,
@@ -197,6 +202,8 @@ def make_train(env, config=None, *, shaping_components=(), per_env_params=False)
         if obs.shape != (config.num_envs, 8):
             raise ValueError("The environment must return observations of shape (8,)")
         params = network.init(init_key, jnp.zeros((8,), dtype=jnp.float32))
+        if actor_init is not None:
+            params = replace_actor(params, actor_init)
         train_state = TrainState.create(
             apply_fn=network.apply, params=params, tx=optimizer
         )
@@ -220,7 +227,11 @@ def make_train(env, config=None, *, shaping_components=(), per_env_params=False)
         )
         initial = RunnerState(
             train_state,
-            update_obs_stats(ObsStats.empty(), obs),
+            (
+                update_obs_stats(ObsStats.empty(), obs)
+                if obs_stats_init is None
+                else obs_stats_init
+            ),
             obs,
             env_state,
             key,

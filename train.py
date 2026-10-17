@@ -6,6 +6,10 @@ documented environment outputs. +adapter=module:function can override bindings.
 
 Exact 50k smoke: +body=europa +vehicle=europa_lander +seed=1
     +ppo.num_envs=16 +ppo.num_steps=125 +ppo.total_steps=50000
+
+Actor-only BC warm start: +bc_init=ckpts/europa_bc/actor_init.msgpack
+    imports its normalization, keeps critic/optimizer fresh, and defaults
+    ppo.initial_log_std to -1.5 unless explicitly supplied.
 """
 
 import hashlib
@@ -223,6 +227,7 @@ def run_experiment(
     vehicle_name="europa_lander",
     output_root="ckpts",
     smoke_success_rate=None,
+    bc_init=None,
 ):
     """Train, checkpoint, log diagnostics, and invoke supplied integration hooks.
 
@@ -236,6 +241,16 @@ def run_experiment(
         raise ValueError(
             "A full run requires a prior smoke_success_rate > 0.10 (and <= 1)"
         )
+    actor_init, obs_stats_init, init_metadata = None, None, None
+    if bc_init is not None:
+        from rl.bc_pretrain import load_bc_checkpoint
+
+        actor_init, obs_stats_init, init_metadata = load_bc_checkpoint(bc_init)
+        if (body_name, vehicle_name) != (
+            init_metadata["body"],
+            init_metadata["vehicle"],
+        ):
+            raise ValueError("BC checkpoint body/vehicle does not match this run")
     # The invariance argument requires the same discount in shaping and PPO.
     # Validate here as callers may build bindings and PPOConfig independently.
     if isinstance(bindings.vehicle_params, dict):
@@ -262,6 +277,7 @@ def run_experiment(
             "per_env_params": bindings.per_env_params,
             "smoke_success_rate": smoke_success_rate,
             "evaluation": bindings.evaluation_config,
+            "actor_initialization": init_metadata,
         }
     )
     config_json = json.dumps(run_config, sort_keys=True, allow_nan=False)
@@ -301,7 +317,13 @@ def run_experiment(
             config,
             shaping_components=bindings.shaping_components,
             per_env_params=bindings.per_env_params,
-        )(jax.random.key(seed), bindings.body_params, bindings.vehicle_params)
+        )(
+            jax.random.key(seed),
+            bindings.body_params,
+            bindings.vehicle_params,
+            actor_init,
+            obs_stats_init,
+        )
         metrics = jax.device_get(result.metrics)
         for index in range(config.num_updates):
             row = _jsonable(jax.tree_util.tree_map(lambda x, i=index: x[i], metrics))
@@ -377,6 +399,8 @@ def main(cfg: DictConfig):
     overrides = OmegaConf.to_container(
         cfg.get("ppo", OmegaConf.create({})), resolve=True
     )
+    if cfg.get("bc_init") is not None:
+        overrides.setdefault("initial_log_std", -1.5)
     run_experiment(
         bindings,
         PPOConfig(**overrides),
@@ -385,6 +409,7 @@ def main(cfg: DictConfig):
         vehicle_name=cfg.get("vehicle", "europa_lander"),
         output_root=cfg.get("output_root", "ckpts"),
         smoke_success_rate=cfg.get("smoke_success_rate"),
+        bc_init=cfg.get("bc_init"),
     )
 
 

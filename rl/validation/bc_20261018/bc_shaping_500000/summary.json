@@ -1,0 +1,139 @@
+{
+  "run_id": "ppo-europa-1-20261017T184030-cc37a51a",
+  "policies": {
+    "PPO": [
+      {
+        "seed": 2000,
+        "outcome": "soft landing",
+        "duration_s": 102.77914428710938,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.37830525636672974,
+        "final_vx_mps": 0.1435384750366211,
+        "last_20s_altitude_range_m": [
+          0.0,
+          40.64226531982422
+        ],
+        "last_20s_mean_abs_vy_mps": 2.087881565093994
+      },
+      {
+        "seed": 2001,
+        "outcome": "soft landing",
+        "duration_s": 98.47892761230469,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.35642901062965393,
+        "final_vx_mps": 0.13254058361053467,
+        "last_20s_altitude_range_m": [
+          0.0,
+          38.43510437011719
+        ],
+        "last_20s_mean_abs_vy_mps": 1.9569810628890991
+      },
+      {
+        "seed": 2002,
+        "outcome": "soft landing",
+        "duration_s": 101.47219848632812,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.37182873487472534,
+        "final_vx_mps": 0.20679929852485657,
+        "last_20s_altitude_range_m": [
+          0.0,
+          28.034561157226562
+        ],
+        "last_20s_mean_abs_vy_mps": 1.4273860454559326
+      },
+      {
+        "seed": 2003,
+        "outcome": "soft landing",
+        "duration_s": 103.98511505126953,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.4302797019481659,
+        "final_vx_mps": 0.03369859978556633,
+        "last_20s_altitude_range_m": [
+          0.0,
+          38.946937561035156
+        ],
+        "last_20s_mean_abs_vy_mps": 2.000678300857544
+      },
+      {
+        "seed": 2004,
+        "outcome": "soft landing",
+        "duration_s": 111.0363540649414,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.49246928095817566,
+        "final_vx_mps": 0.20199628174304962,
+        "last_20s_altitude_range_m": [
+          0.0,
+          12.263321876525879
+        ],
+        "last_20s_mean_abs_vy_mps": 0.6395230293273926
+      }
+    ],
+    "PD": [
+      {
+        "seed": 2000,
+        "outcome": "soft landing",
+        "duration_s": 92.34062194824219,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.7925093770027161,
+        "final_vx_mps": -0.04607833921909332,
+        "last_20s_altitude_range_m": [
+          0.0,
+          133.28237915039062
+        ],
+        "last_20s_mean_abs_vy_mps": 6.787693023681641
+      },
+      {
+        "seed": 2001,
+        "outcome": "soft landing",
+        "duration_s": 88.13289642333984,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.5443439483642578,
+        "final_vx_mps": -0.035046402364969254,
+        "last_20s_altitude_range_m": [
+          0.0,
+          135.35211181640625
+        ],
+        "last_20s_mean_abs_vy_mps": 6.7960076332092285
+      },
+      {
+        "seed": 2002,
+        "outcome": "soft landing",
+        "duration_s": 88.45320129394531,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.29228025674819946,
+        "final_vx_mps": 0.07622223347425461,
+        "last_20s_altitude_range_m": [
+          0.0,
+          132.61314392089844
+        ],
+        "last_20s_mean_abs_vy_mps": 6.665699005126953
+      },
+      {
+        "seed": 2003,
+        "outcome": "soft landing",
+        "duration_s": 93.14490509033203,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.3000195026397705,
+        "final_vx_mps": 0.07063542306423187,
+        "last_20s_altitude_range_m": [
+          0.0,
+          137.48980712890625
+        ],
+        "last_20s_mean_abs_vy_mps": 6.989119052886963
+      },
+      {
+        "seed": 2004,
+        "outcome": "soft landing",
+        "duration_s": 92.53031921386719,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.28575652837753296,
+        "final_vx_mps": 0.025815775617957115,
+        "last_20s_altitude_range_m": [
+          0.0,
+          125.5793685913086
+        ],
+        "last_20s_mean_abs_vy_mps": 6.381526470184326
+      }
+    ]
+  }
+}

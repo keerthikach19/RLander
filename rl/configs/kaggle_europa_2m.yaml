@@ -1,0 +1,37 @@
+# Prepared only: do not launch until the no-BC smoke gate passes and approved.
+# Inspect without training:
+# uv run python train.py --config-path rl/configs --config-name kaggle_europa_2m --cfg job
+# On Kaggle, run from the repository with its dependencies/JAX GPU installed.
+body: europa
+vehicle: europa_lander
+seed: 1
+bc_init: null
+smoke_success_rate: null  # Keep the >10% gate; no qualifying no-BC result yet.
+output_root: /kaggle/working/ckpts/europa_shaped_no_bc_2m
+reward:
+  mode: potential_profile  # Maps to env reward_mode=1.
+  potential_scale: 100.0
+evaluation:
+  seed_start: 2000
+  episodes: 100
+ppo:
+  num_envs: 128
+  num_steps: 125
+  total_steps: 2000000  # Exactly 125 updates of 16,000 transitions.
+  num_minibatches: 8
+  update_epochs: 4
+  learning_rate: 0.0003
+  gamma: 0.995
+  gae_lambda: 0.95
+  clip_coef: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  initial_action_mean: [-0.5, 0.0]
+  initial_log_std: -1.0
+  reward_scale: 0.01
+hydra:
+  run:
+    dir: /kaggle/working/hydra/europa_shaped_no_bc_2m/${now:%Y%m%d_%H%M%S}
+  job:
+    chdir: false

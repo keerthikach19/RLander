@@ -1,0 +1,139 @@
+{
+  "run_id": "ppo-europa-1-20261017T183946-284431f4",
+  "policies": {
+    "PPO": [
+      {
+        "seed": 2000,
+        "outcome": "soft landing",
+        "duration_s": 93.5450668334961,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.7071650624275208,
+        "final_vx_mps": 0.06575465202331543,
+        "last_20s_altitude_range_m": [
+          0.0,
+          110.05992889404297
+        ],
+        "last_20s_mean_abs_vy_mps": 5.614189624786377
+      },
+      {
+        "seed": 2001,
+        "outcome": "crash",
+        "duration_s": 86.60015106201172,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -1.5540509223937988,
+        "final_vx_mps": 0.0467720665037632,
+        "last_20s_altitude_range_m": [
+          0.0,
+          147.4109344482422
+        ],
+        "last_20s_mean_abs_vy_mps": 7.422014236450195
+      },
+      {
+        "seed": 2002,
+        "outcome": "soft landing",
+        "duration_s": 89.21902465820312,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.30650514364242554,
+        "final_vx_mps": -0.0018722283421084285,
+        "last_20s_altitude_range_m": [
+          0.0,
+          115.66793060302734
+        ],
+        "last_20s_mean_abs_vy_mps": 5.822928428649902
+      },
+      {
+        "seed": 2003,
+        "outcome": "crash",
+        "duration_s": 91.13745880126953,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -1.6197874546051025,
+        "final_vx_mps": 0.09166710823774338,
+        "last_20s_altitude_range_m": [
+          0.0,
+          156.7080078125
+        ],
+        "last_20s_mean_abs_vy_mps": 7.977842330932617
+      },
+      {
+        "seed": 2004,
+        "outcome": "crash",
+        "duration_s": 92.1365737915039,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -1.0737409591674805,
+        "final_vx_mps": -0.008018518798053265,
+        "last_20s_altitude_range_m": [
+          0.0,
+          123.40463256835938
+        ],
+        "last_20s_mean_abs_vy_mps": 6.283090114593506
+      }
+    ],
+    "PD": [
+      {
+        "seed": 2000,
+        "outcome": "soft landing",
+        "duration_s": 92.34062194824219,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.7925093770027161,
+        "final_vx_mps": -0.04607833921909332,
+        "last_20s_altitude_range_m": [
+          0.0,
+          133.28237915039062
+        ],
+        "last_20s_mean_abs_vy_mps": 6.787693023681641
+      },
+      {
+        "seed": 2001,
+        "outcome": "soft landing",
+        "duration_s": 88.13289642333984,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.5443439483642578,
+        "final_vx_mps": -0.035046402364969254,
+        "last_20s_altitude_range_m": [
+          0.0,
+          135.35211181640625
+        ],
+        "last_20s_mean_abs_vy_mps": 6.7960076332092285
+      },
+      {
+        "seed": 2002,
+        "outcome": "soft landing",
+        "duration_s": 88.45320129394531,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.29228025674819946,
+        "final_vx_mps": 0.07622223347425461,
+        "last_20s_altitude_range_m": [
+          0.0,
+          132.61314392089844
+        ],
+        "last_20s_mean_abs_vy_mps": 6.665699005126953
+      },
+      {
+        "seed": 2003,
+        "outcome": "soft landing",
+        "duration_s": 93.14490509033203,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.3000195026397705,
+        "final_vx_mps": 0.07063542306423187,
+        "last_20s_altitude_range_m": [
+          0.0,
+          137.48980712890625
+        ],
+        "last_20s_mean_abs_vy_mps": 6.989119052886963
+      },
+      {
+        "seed": 2004,
+        "outcome": "soft landing",
+        "duration_s": 92.53031921386719,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.28575652837753296,
+        "final_vx_mps": 0.025815775617957115,
+        "last_20s_altitude_range_m": [
+          0.0,
+          125.5793685913086
+        ],
+        "last_20s_mean_abs_vy_mps": 6.381526470184326
+      }
+    ]
+  }
+}

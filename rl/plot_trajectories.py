@@ -120,6 +120,8 @@ def plot_run(run_dir, output_dir=None, seed_start=None):
         f"Europa RK4 | {manifest['run']['reward_id']} | "
         f"{manifest['actual_steps']:,} steps"
     )
+    if manifest["config"].get("actor_initialization"):
+        title += " | BC init"
     for column, ylabel, filename in (
         (1, "Altitude (m)", "altitude.png"),
         (2, "Vertical velocity (m/s)", "vertical_velocity.png"),

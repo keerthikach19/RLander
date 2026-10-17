@@ -9,6 +9,21 @@ import jax.numpy as jnp
 from flax import linen as nn
 from flax import struct
 
+ACTOR_LAYERS = ("actor_0", "actor_1", "actor_mean")
+
+
+def replace_actor(params, actor_params):
+    """Copy only MLP weights; critic and log-std always retain fresh values."""
+    if set(actor_params) != set(ACTOR_LAYERS):
+        raise ValueError("Actor init must contain exactly the three actor MLP layers")
+    for name in ACTOR_LAYERS:
+        if set(actor_params[name]) != {"kernel", "bias"}:
+            raise ValueError(f"Invalid actor layer: {name}")
+        for leaf in ("kernel", "bias"):
+            if actor_params[name][leaf].shape != params["params"][name][leaf].shape:
+                raise ValueError(f"Actor init shape mismatch: {name}/{leaf}")
+    return {**params, "params": {**params["params"], **actor_params}}
+
 
 class ActorCritic(nn.Module):
     action_dim: int = 2

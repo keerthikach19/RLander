@@ -991,8 +991,13 @@ def test_trajectory_recording_matches_evaluation_and_stops_at_contact():
         bindings.body_params, bindings.vehicle_params, policy, seeds
     )
     evaluation = evaluate_smoke(
-        bindings.env, bindings.body_params, bindings.vehicle_params,
-        None, None, seeds=seeds, policy_fn=policy,
+        bindings.env,
+        bindings.body_params,
+        bindings.vehicle_params,
+        None,
+        None,
+        seeds=seeds,
+        policy_fn=policy,
     )["episodes"]
     for index, row in enumerate(rows):
         trace = row["trace"]
@@ -1009,3 +1014,99 @@ def test_trajectory_recording_matches_evaluation_and_stops_at_contact():
         collect_trajectories(
             bindings.body_params, bindings.vehicle_params, policy, seeds, max_steps=1
         )
+
+
+def test_bc_checkpoint_and_ppo_keep_critic_and_log_std_fresh(tmp_path):
+    from rl.bc_pretrain import load_bc_checkpoint, save_bc_checkpoint
+    from rl.networks import ACTOR_LAYERS, replace_actor
+
+    body, vehicle = parameters()
+    source = ActorCritic().init(jax.random.key(123), jnp.zeros(8))
+    actor = {name: source["params"][name] for name in ACTOR_LAYERS}
+    stats = update_obs_stats(
+        ObsStats.empty(), jax.random.normal(jax.random.key(8), (100, 8))
+    )
+    path = tmp_path / "init.msgpack"
+    save_bc_checkpoint(path, actor, stats)
+    restored, restored_stats, metadata = load_bc_checkpoint(path)
+    assert len(metadata["sha256"]) == 64
+    for a, b in zip(
+        jax.tree_util.tree_leaves(stats), jax.tree_util.tree_leaves(restored_stats)
+    ):
+        np.testing.assert_array_equal(a, b)
+    config = PPOConfig(
+        num_envs=2,
+        num_steps=4,
+        total_steps=8,
+        num_minibatches=1,
+        update_epochs=1,
+        learning_rate=1e-30,
+        initial_log_std=-1.5,
+    )
+    key = jax.random.key(1)
+    fresh = ActorCritic(initial_log_std=-1.5).init(
+        jax.random.split(key, 4)[1], jnp.zeros(8)
+    )
+    expected = replace_actor(fresh, restored)
+    result = make_train(FakeEnv(), config)(key, body, vehicle, restored, restored_stats)
+    for a, b in zip(
+        jax.tree_util.tree_leaves(expected),
+        jax.tree_util.tree_leaves(result.runner.train_state.params),
+    ):
+        # A tiny nonzero PPO update can move initially zero biases by ~1e-30.
+        np.testing.assert_allclose(a, b, atol=1e-6, rtol=1e-6)
+    np.testing.assert_array_equal(
+        result.runner.train_state.params["params"]["log_std"], [-1.5, -1.5]
+    )
+    np.testing.assert_allclose(result.runner.obs_stats.count, stats.count + 8)
+    with pytest.raises(ValueError, match="paired"):
+        make_train(FakeEnv(), config)(key, body, vehicle, restored)
+    with pytest.raises(ValueError, match="three actor"):
+        replace_actor(fresh, {**restored, "critic_0": fresh["params"]["critic_0"]})
+    invalid = jax.tree_util.tree_map(lambda x: jnp.full_like(x, jnp.nan), actor)
+    save_bc_checkpoint(tmp_path / "invalid.msgpack", invalid, stats)
+    with pytest.raises(ValueError, match="Non-finite"):
+        load_bc_checkpoint(tmp_path / "invalid.msgpack")
+
+
+def test_bc_collection_labels_and_fit():
+    from rl.bc_pretrain import collect_pd, fit_actor
+    from rl.networks import replace_actor
+
+    body, vehicle = parameters()
+    obs, actions, summary = collect_pd(FakeEnv(), body, vehicle, steps=128, num_envs=4)
+    np.testing.assert_allclose(actions, pd_action(obs, body, vehicle), atol=1e-6)
+    assert summary["steps"] == 128
+    assert sum(summary[k] for k in ("soft_landings", "crashed", "timeouts")) > 0
+    # Learn a held-out analytic action mapping, not memorized training labels.
+    train_obs = jax.random.normal(jax.random.key(10), (512, 8))
+    targets = 0.25 * jnp.tanh(train_obs[:, :2])
+    actor, stats, metrics = fit_actor(train_obs, targets, epochs=20, batch_size=64)
+    assert metrics["final_train_mse"] < metrics["initial_train_mse"] * 0.1
+    held = jax.random.normal(jax.random.key(11), (128, 8))
+    params = replace_actor(ActorCritic().init(jax.random.key(0), jnp.zeros(8)), actor)
+    mean, _, _ = ActorCritic().apply(params, normalize_obs(held, stats))
+    assert float(jnp.square(mean - 0.25 * jnp.tanh(held[:, :2])).mean()) < 0.005
+
+
+def test_kaggle_config_is_exact_no_bc_and_keeps_gate(tmp_path):
+    from omegaconf import OmegaConf
+
+    from train import lander_bindings, run_experiment
+
+    cfg = OmegaConf.load(
+        Path(__file__).resolve().parents[1] / "rl/configs/kaggle_europa_2m.yaml"
+    )
+    config = PPOConfig(**OmegaConf.to_container(cfg.ppo))
+    assert config.num_updates * config.batch_size == 2_000_000
+    assert cfg.bc_init is None
+    bindings = lander_bindings(cfg)
+    assert float(bindings.vehicle_params["reward_mode"]) == 1
+    with pytest.raises(ValueError, match="prior smoke_success_rate"):
+        run_experiment(
+            bindings,
+            config,
+            output_root=tmp_path,
+            smoke_success_rate=cfg.smoke_success_rate,
+        )
+    assert not list(tmp_path.iterdir())
