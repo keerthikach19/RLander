@@ -1,9 +1,16 @@
 # PD behavior cloning and shaped PPO — 2026-10-18
 
 BC-initialized PPO reaches **100/100 soft landings at 500k PPO steps** on the
-specified validation set. The saved checkpoint reproduces this result. No
+specified validation set. This is promising validation evidence, not a confirmed
+frozen-test or multi-seed result. The method is **PPO fine-tuned from a
+behavior-cloned PD controller**, not PPO from scratch. The saved checkpoint reproduces this result. No
 three-seed full run or Kaggle run was launched. `env/` is unchanged from the
 previous RK4 validation commit, `86cdb9c`.
+
+The [follow-up stability audit](../stability_20261018/README.md) reports three
+continuous training seeds, the W3 frozen evaluations, sampled-action sensitivity,
+and the unresolved shaping-magnitude finding. Its results qualify the original
+single-seed validation result below.
 
 | Policy | PPO steps | Soft landings | Crashes | Timeouts |
 |---|---:|---:|---:|---:|
@@ -26,6 +33,22 @@ also contribute observation/action pairs. A separate 20,000-transition stream
 (root seed 31416) supplies held-out MSE only: 63 soft landings, one crash, no
 timeouts, plus partial episodes. Neither validation outcomes nor held-out labels
 are used for fitting or checkpoint selection.
+
+The PD teacher receives the noisy `obs` returned by reset/step, together with
+nominal config parameters; it never receives clean per-episode state. PPO sees
+the same observation interface. Altitude noise is sigma=0.5 m + 0.5% of height,
+velocity noise is sigma=0.1 m/s per axis, and acceleration noise is sigma=0.02 g.
+Reset randomizes height +/-10%, descent speed +/-20%, initial vx +/-2 m/s,
+mass and thrust +/-5%, and gravity +/-2%. Evaluation uses clipped actor means;
+it does not sample the learned Gaussian, whose log-std remains trainable.
+
+The reward keeps all six named components and PLAN 5.5 weights (velocity 1,
+altitude .5, fuel .1, angle .05, terminals +/-100). PLAN 5.5.1 adds the profile
+potential difference to `velocity`, with experimental scale 100 and gamma .995.
+The successful run's final training update logs `shaping_to_terminal_ratio`=
+1.394605 and `shaping_magnitude_status=above_target`; its deterministic validation
+ratio is 1.401677. This exceeds the .2--1 target and remains an explicit audit
+finding. No reward rescaling was performed during this validation.
 
 The two-layer 64-unit tanh actor was fitted to PD action labels with unweighted
 MSE on raw actor means, 80 fixed epochs, batch size 512, Adam with cosine learning

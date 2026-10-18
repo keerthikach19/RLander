@@ -1,0 +1,22 @@
+{
+  "episodes": 300,
+  "counts_by_w3_run_id": {
+    "1": [
+      100,
+      0,
+      0
+    ],
+    "2": [
+      99,
+      1,
+      0
+    ],
+    "3": [
+      54,
+      46,
+      0
+    ]
+  },
+  "terminal_parquet_matches_outcome_thresholds": true,
+  "exact_frozen_seed_set_per_run": true
+}

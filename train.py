@@ -228,6 +228,7 @@ def run_experiment(
     output_root="ckpts",
     smoke_success_rate=None,
     bc_init=None,
+    checkpoint_steps=(),
 ):
     """Train, checkpoint, log diagnostics, and invoke supplied integration hooks.
 
@@ -278,6 +279,7 @@ def run_experiment(
             "smoke_success_rate": smoke_success_rate,
             "evaluation": bindings.evaluation_config,
             "actor_initialization": init_metadata,
+            "checkpoint_steps": list(checkpoint_steps),
         }
     )
     config_json = json.dumps(run_config, sort_keys=True, allow_nan=False)
@@ -317,6 +319,7 @@ def run_experiment(
             config,
             shaping_components=bindings.shaping_components,
             per_env_params=bindings.per_env_params,
+            checkpoint_steps=checkpoint_steps,
         )(
             jax.random.key(seed),
             bindings.body_params,
@@ -341,20 +344,22 @@ def run_experiment(
             log.write(json.dumps({"event": "update", **row}, allow_nan=False) + "\n")
 
     runner = result.runner
-    payload = {
-        "train_state": serialization.to_state_dict(runner.train_state),
-        "obs_stats": serialization.to_state_dict(runner.obs_stats),
-        "env_state": serialization.to_state_dict(runner.env_state),
-        "obs": runner.obs,
-        "rng_key_data": jax.random.key_data(runner.key),
-        "episode_components": runner.episode_components,
-        "episode_lengths": runner.episode_lengths,
-    }
-    # Host arrays make GPU-trained checkpoints portable to CPU evaluation without
-    # restoring device/sharding assignments from the training machine.
-    payload = jax.device_get(payload)
-    with ocp.PyTreeCheckpointer() as checkpointer:
-        checkpointer.save(metadata["checkpoint_path"], payload)
+
+    def save_runner(saved_runner, path):
+        payload = {
+            "train_state": serialization.to_state_dict(saved_runner.train_state),
+            "obs_stats": serialization.to_state_dict(saved_runner.obs_stats),
+            "env_state": serialization.to_state_dict(saved_runner.env_state),
+            "obs": saved_runner.obs,
+            "rng_key_data": jax.random.key_data(saved_runner.key),
+            "episode_components": saved_runner.episode_components,
+            "episode_lengths": saved_runner.episode_lengths,
+        }
+        # Host arrays keep checkpoints portable across execution devices.
+        with ocp.PyTreeCheckpointer() as checkpointer:
+            checkpointer.save(str(path), jax.device_get(payload))
+
+    save_runner(runner, metadata["checkpoint_path"])
     manifest.update(
         status="checkpoint_saved", actual_steps=config.num_updates * config.batch_size
     )
@@ -370,6 +375,38 @@ def run_experiment(
         manifest["evaluation_status"] = "complete"
     else:
         manifest["evaluation"] = {"status": "pending W3 evaluation adapter"}
+    snapshot_paths = {}
+    for step, snapshot in zip(checkpoint_steps, result.checkpoints):
+        snapshot_dir = run_dir / "snapshots" / str(step)
+        snapshot_dir.mkdir(parents=True, exist_ok=False)
+        snapshot_path = snapshot_dir / "checkpoint"
+        save_runner(snapshot, snapshot_path)
+        snapshot_manifest = {
+            **manifest,
+            "run": {
+                **metadata,
+                "id": f"{run_id}-at-{step}",
+                "checkpoint_path": str(snapshot_path),
+            },
+            "parent_run_id": run_id,
+            "actual_steps": step,
+            "status": "complete",
+            "database_status": "pending",
+            "evaluation": (
+                _jsonable(
+                    bindings.evaluate(snapshot.train_state.params, snapshot.obs_stats)
+                )
+                if bindings.evaluate is not None
+                else manifest["evaluation"]
+            ),
+        }
+        (snapshot_dir / "manifest.json").write_text(
+            json.dumps(snapshot_manifest, indent=2, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+        snapshot_paths[str(step)] = str(snapshot_dir)
+    if snapshot_paths:
+        manifest["snapshots"] = snapshot_paths
     manifest["status"] = "complete"
     write_manifest()
     print(
@@ -410,6 +447,7 @@ def main(cfg: DictConfig):
         output_root=cfg.get("output_root", "ckpts"),
         smoke_success_rate=cfg.get("smoke_success_rate"),
         bc_init=cfg.get("bc_init"),
+        checkpoint_steps=tuple(cfg.get("checkpoint_steps", ())),
     )
 
 

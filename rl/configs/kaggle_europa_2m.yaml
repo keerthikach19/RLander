@@ -9,6 +9,12 @@ bc_init: null
 smoke_success_rate: null  # Keep the >10% gate; no qualifying no-BC result yet.
 output_root: /kaggle/working/ckpts/europa_shaped_no_bc_2m
 reward:
+  # PLAN 5.5 baseline weights remain velocity=1, altitude=.5, fuel=.1,
+  # angle=.05, terminal +/-100, with the same six named components.
+  # PLAN 5.5.1 adds gamma*Phi(next)-Phi(now) to velocity only; gamma=.995.
+  # Assumptions: v_ref=-min(30, sqrt(.4^2+g*max(h,0))) m/s, Phi=-k*error/U.
+  # k=100 is experimental (env default is 20), not a new success threshold.
+  # The successful BC run's dense/terminal ratio was ~1.40, ABOVE .2--1 target.
   mode: potential_profile  # Maps to env reward_mode=1.
   potential_scale: 100.0
 evaluation:

@@ -106,6 +106,7 @@ class RunnerState:
 class TrainResult:
     runner: RunnerState
     metrics: object
+    checkpoints: tuple = ()
 
 
 def compute_gae(rewards, values, next_values, done, truncated, gamma, gae_lambda):
@@ -162,7 +163,14 @@ def ppo_loss(params, apply_fn, batch, config):
     }
 
 
-def make_train(env, config=None, *, shaping_components=(), per_env_params=False):
+def make_train(
+    env,
+    config=None,
+    *,
+    shaping_components=(),
+    per_env_params=False,
+    checkpoint_steps=(),
+):
     """Build train(key, body, vehicle, actor_init=None, obs_stats_init=None).
 
     Numeric parameter pytrees are data arguments (shared by default, or batched
@@ -171,8 +179,20 @@ def make_train(env, config=None, *, shaping_components=(), per_env_params=False)
     Only aggregate per-update diagnostics leave the compiled training loop.
     Optional initialization imports only the actor MLP and paired normalization;
     critic, log-std, optimizer, RNG, and environments are initialized fresh.
+    Optional checkpoint_steps retain complete runners on one continuous schedule.
     """
     config = PPOConfig() if config is None else config
+    checkpoint_steps = tuple(checkpoint_steps)
+    if checkpoint_steps != tuple(sorted(set(checkpoint_steps))) or any(
+        not isinstance(step, int)
+        or step <= 0
+        or step % config.batch_size
+        or step >= config.num_updates * config.batch_size
+        for step in checkpoint_steps
+    ):
+        raise ValueError(
+            "checkpoint_steps must be sorted unique rollout boundaries before the final step"
+        )
     network = ActorCritic(
         initial_action_mean=config.initial_action_mean,
         initial_log_std=config.initial_log_std,
@@ -386,7 +406,18 @@ def make_train(env, config=None, *, shaping_components=(), per_env_params=False)
             )
             return runner, metrics
 
-        runner, metrics = jax.lax.scan(update, initial, jnp.arange(config.num_updates))
-        return TrainResult(runner, metrics)
+        runner, start = initial, 0
+        snapshots, metric_parts = [], []
+        boundaries = [step // config.batch_size for step in checkpoint_steps]
+        for stop in (*boundaries, config.num_updates):
+            runner, metrics = jax.lax.scan(update, runner, jnp.arange(start, stop))
+            metric_parts.append(metrics)
+            if stop in boundaries:
+                snapshots.append(runner)
+            start = stop
+        metrics = jax.tree_util.tree_map(
+            lambda *parts: jnp.concatenate(parts), *metric_parts
+        )
+        return TrainResult(runner, metrics, tuple(snapshots))
 
     return jax.jit(train)

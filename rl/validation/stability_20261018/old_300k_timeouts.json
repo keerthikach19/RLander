@@ -1,0 +1,420 @@
+[
+  {
+    "seed": 2006,
+    "outcome": 3,
+    "final_altitude_m": 18.34951400756836,
+    "final_vy_mps": -0.19669471681118011,
+    "last20_altitude_min_max_m": [
+      18.34951400756836,
+      25.667001724243164
+    ],
+    "last20_mean_abs_vy_mps": 0.37254413962364197
+  },
+  {
+    "seed": 2014,
+    "outcome": 3,
+    "final_altitude_m": 19.776540756225586,
+    "final_vy_mps": -0.4891147017478943,
+    "last20_altitude_min_max_m": [
+      19.776540756225586,
+      28.998676300048828
+    ],
+    "last20_mean_abs_vy_mps": 0.4620783030986786
+  },
+  {
+    "seed": 2015,
+    "outcome": 3,
+    "final_altitude_m": 14.4541015625,
+    "final_vy_mps": -0.6103700995445251,
+    "last20_altitude_min_max_m": [
+      14.4541015625,
+      25.235042572021484
+    ],
+    "last20_mean_abs_vy_mps": 0.5494521856307983
+  },
+  {
+    "seed": 2025,
+    "outcome": 3,
+    "final_altitude_m": 19.176551818847656,
+    "final_vy_mps": -0.5153874754905701,
+    "last20_altitude_min_max_m": [
+      19.176551818847656,
+      29.42371940612793
+    ],
+    "last20_mean_abs_vy_mps": 0.5163960456848145
+  },
+  {
+    "seed": 2027,
+    "outcome": 3,
+    "final_altitude_m": 9.475494384765625,
+    "final_vy_mps": -0.45298147201538086,
+    "last20_altitude_min_max_m": [
+      9.475494384765625,
+      19.466943740844727
+    ],
+    "last20_mean_abs_vy_mps": 0.5048021078109741
+  },
+  {
+    "seed": 2028,
+    "outcome": 3,
+    "final_altitude_m": 19.343626022338867,
+    "final_vy_mps": -0.4537413418292999,
+    "last20_altitude_min_max_m": [
+      19.343626022338867,
+      25.977476119995117
+    ],
+    "last20_mean_abs_vy_mps": 0.33662983775138855
+  },
+  {
+    "seed": 2032,
+    "outcome": 3,
+    "final_altitude_m": 12.28148078918457,
+    "final_vy_mps": -0.33789756894111633,
+    "last20_altitude_min_max_m": [
+      12.28148078918457,
+      22.091888427734375
+    ],
+    "last20_mean_abs_vy_mps": 0.4955703020095825
+  },
+  {
+    "seed": 2036,
+    "outcome": 3,
+    "final_altitude_m": 28.951744079589844,
+    "final_vy_mps": -0.18317021429538727,
+    "last20_altitude_min_max_m": [
+      28.951744079589844,
+      34.47062683105469
+    ],
+    "last20_mean_abs_vy_mps": 0.27852723002433777
+  },
+  {
+    "seed": 2038,
+    "outcome": 3,
+    "final_altitude_m": 12.08230972290039,
+    "final_vy_mps": -0.31370124220848083,
+    "last20_altitude_min_max_m": [
+      12.08230972290039,
+      22.708877563476562
+    ],
+    "last20_mean_abs_vy_mps": 0.538043200969696
+  },
+  {
+    "seed": 2039,
+    "outcome": 3,
+    "final_altitude_m": 29.85422706604004,
+    "final_vy_mps": -0.5782077312469482,
+    "last20_altitude_min_max_m": [
+      29.85422706604004,
+      37.72536087036133
+    ],
+    "last20_mean_abs_vy_mps": 0.4027504026889801
+  },
+  {
+    "seed": 2041,
+    "outcome": 3,
+    "final_altitude_m": 20.89533042907715,
+    "final_vy_mps": -0.42063477635383606,
+    "last20_altitude_min_max_m": [
+      20.89533042907715,
+      30.0131778717041
+    ],
+    "last20_mean_abs_vy_mps": 0.4617578089237213
+  },
+  {
+    "seed": 2042,
+    "outcome": 3,
+    "final_altitude_m": 23.94867515563965,
+    "final_vy_mps": -0.24808716773986816,
+    "last20_altitude_min_max_m": [
+      23.94867515563965,
+      33.78947830200195
+    ],
+    "last20_mean_abs_vy_mps": 0.4976537823677063
+  },
+  {
+    "seed": 2044,
+    "outcome": 3,
+    "final_altitude_m": 14.530780792236328,
+    "final_vy_mps": -0.46594440937042236,
+    "last20_altitude_min_max_m": [
+      14.530780792236328,
+      24.507492065429688
+    ],
+    "last20_mean_abs_vy_mps": 0.5071955919265747
+  },
+  {
+    "seed": 2045,
+    "outcome": 3,
+    "final_altitude_m": 10.374886512756348,
+    "final_vy_mps": -0.6232097744941711,
+    "last20_altitude_min_max_m": [
+      10.374886512756348,
+      20.577526092529297
+    ],
+    "last20_mean_abs_vy_mps": 0.5125259160995483
+  },
+  {
+    "seed": 2046,
+    "outcome": 3,
+    "final_altitude_m": 28.502723693847656,
+    "final_vy_mps": -0.4699944257736206,
+    "last20_altitude_min_max_m": [
+      28.502723693847656,
+      36.3986930847168
+    ],
+    "last20_mean_abs_vy_mps": 0.3969118893146515
+  },
+  {
+    "seed": 2047,
+    "outcome": 3,
+    "final_altitude_m": 8.773028373718262,
+    "final_vy_mps": -0.4898797869682312,
+    "last20_altitude_min_max_m": [
+      8.773028373718262,
+      18.393184661865234
+    ],
+    "last20_mean_abs_vy_mps": 0.48395416140556335
+  },
+  {
+    "seed": 2048,
+    "outcome": 3,
+    "final_altitude_m": 5.320196628570557,
+    "final_vy_mps": -0.24182413518428802,
+    "last20_altitude_min_max_m": [
+      5.320196628570557,
+      14.278470993041992
+    ],
+    "last20_mean_abs_vy_mps": 0.45619824528694153
+  },
+  {
+    "seed": 2049,
+    "outcome": 3,
+    "final_altitude_m": 0.30467548966407776,
+    "final_vy_mps": -0.30257126688957214,
+    "last20_altitude_min_max_m": [
+      0.30467548966407776,
+      9.682199478149414
+    ],
+    "last20_mean_abs_vy_mps": 0.4766261577606201
+  },
+  {
+    "seed": 2052,
+    "outcome": 3,
+    "final_altitude_m": 3.611361265182495,
+    "final_vy_mps": -0.6543482542037964,
+    "last20_altitude_min_max_m": [
+      3.611361265182495,
+      14.066123962402344
+    ],
+    "last20_mean_abs_vy_mps": 0.5268658995628357
+  },
+  {
+    "seed": 2054,
+    "outcome": 3,
+    "final_altitude_m": 25.66864776611328,
+    "final_vy_mps": -0.5229710340499878,
+    "last20_altitude_min_max_m": [
+      25.66864776611328,
+      34.632205963134766
+    ],
+    "last20_mean_abs_vy_mps": 0.4496810734272003
+  },
+  {
+    "seed": 2055,
+    "outcome": 3,
+    "final_altitude_m": 10.203102111816406,
+    "final_vy_mps": -0.4131551682949066,
+    "last20_altitude_min_max_m": [
+      10.203102111816406,
+      18.849151611328125
+    ],
+    "last20_mean_abs_vy_mps": 0.44004589319229126
+  },
+  {
+    "seed": 2056,
+    "outcome": 3,
+    "final_altitude_m": 10.279748916625977,
+    "final_vy_mps": -0.6505486369132996,
+    "last20_altitude_min_max_m": [
+      10.279748916625977,
+      20.76041603088379
+    ],
+    "last20_mean_abs_vy_mps": 0.5268447995185852
+  },
+  {
+    "seed": 2057,
+    "outcome": 3,
+    "final_altitude_m": 2.8934543132781982,
+    "final_vy_mps": -0.7435979247093201,
+    "last20_altitude_min_max_m": [
+      2.8934543132781982,
+      13.571163177490234
+    ],
+    "last20_mean_abs_vy_mps": 0.5444222688674927
+  },
+  {
+    "seed": 2061,
+    "outcome": 3,
+    "final_altitude_m": 17.120468139648438,
+    "final_vy_mps": -0.1677716076374054,
+    "last20_altitude_min_max_m": [
+      17.120468139648438,
+      25.696136474609375
+    ],
+    "last20_mean_abs_vy_mps": 0.4304127097129822
+  },
+  {
+    "seed": 2063,
+    "outcome": 3,
+    "final_altitude_m": 28.3306884765625,
+    "final_vy_mps": -0.4006211459636688,
+    "last20_altitude_min_max_m": [
+      28.3306884765625,
+      36.05118179321289
+    ],
+    "last20_mean_abs_vy_mps": 0.3869745433330536
+  },
+  {
+    "seed": 2066,
+    "outcome": 3,
+    "final_altitude_m": 23.58842658996582,
+    "final_vy_mps": -0.44893887639045715,
+    "last20_altitude_min_max_m": [
+      23.58842658996582,
+      31.277015686035156
+    ],
+    "last20_mean_abs_vy_mps": 0.3857710361480713
+  },
+  {
+    "seed": 2068,
+    "outcome": 3,
+    "final_altitude_m": 27.32432746887207,
+    "final_vy_mps": -0.32536816596984863,
+    "last20_altitude_min_max_m": [
+      27.32432746887207,
+      37.31208801269531
+    ],
+    "last20_mean_abs_vy_mps": 0.49689626693725586
+  },
+  {
+    "seed": 2070,
+    "outcome": 3,
+    "final_altitude_m": 18.383991241455078,
+    "final_vy_mps": -0.6373846530914307,
+    "last20_altitude_min_max_m": [
+      18.383991241455078,
+      25.93352699279785
+    ],
+    "last20_mean_abs_vy_mps": 0.3905643820762634
+  },
+  {
+    "seed": 2071,
+    "outcome": 3,
+    "final_altitude_m": 33.491966247558594,
+    "final_vy_mps": -0.5178138017654419,
+    "last20_altitude_min_max_m": [
+      33.491966247558594,
+      39.878211975097656
+    ],
+    "last20_mean_abs_vy_mps": 0.3244078457355499
+  },
+  {
+    "seed": 2073,
+    "outcome": 3,
+    "final_altitude_m": 33.12125015258789,
+    "final_vy_mps": -0.2531752288341522,
+    "last20_altitude_min_max_m": [
+      33.12125015258789,
+      39.489864349365234
+    ],
+    "last20_mean_abs_vy_mps": 0.32143840193748474
+  },
+  {
+    "seed": 2079,
+    "outcome": 3,
+    "final_altitude_m": 26.075239181518555,
+    "final_vy_mps": -0.5240449905395508,
+    "last20_altitude_min_max_m": [
+      26.075239181518555,
+      32.10087203979492
+    ],
+    "last20_mean_abs_vy_mps": 0.3035304546356201
+  },
+  {
+    "seed": 2082,
+    "outcome": 3,
+    "final_altitude_m": 31.961071014404297,
+    "final_vy_mps": -0.38804417848587036,
+    "last20_altitude_min_max_m": [
+      31.961071014404297,
+      37.36897659301758
+    ],
+    "last20_mean_abs_vy_mps": 0.2760087251663208
+  },
+  {
+    "seed": 2091,
+    "outcome": 3,
+    "final_altitude_m": 26.204330444335938,
+    "final_vy_mps": -0.22967733442783356,
+    "last20_altitude_min_max_m": [
+      26.204330444335938,
+      32.3659553527832
+    ],
+    "last20_mean_abs_vy_mps": 0.31199055910110474
+  },
+  {
+    "seed": 2093,
+    "outcome": 3,
+    "final_altitude_m": 31.452573776245117,
+    "final_vy_mps": -0.061839137226343155,
+    "last20_altitude_min_max_m": [
+      31.452573776245117,
+      38.363468170166016
+    ],
+    "last20_mean_abs_vy_mps": 0.3471118211746216
+  },
+  {
+    "seed": 2096,
+    "outcome": 3,
+    "final_altitude_m": 17.618619918823242,
+    "final_vy_mps": -0.5756911039352417,
+    "last20_altitude_min_max_m": [
+      17.618619918823242,
+      24.168935775756836
+    ],
+    "last20_mean_abs_vy_mps": 0.33710646629333496
+  },
+  {
+    "seed": 2097,
+    "outcome": 3,
+    "final_altitude_m": 9.024819374084473,
+    "final_vy_mps": -0.3482761085033417,
+    "last20_altitude_min_max_m": [
+      9.024819374084473,
+      18.809110641479492
+    ],
+    "last20_mean_abs_vy_mps": 0.492648184299469
+  },
+  {
+    "seed": 2098,
+    "outcome": 3,
+    "final_altitude_m": 23.974910736083984,
+    "final_vy_mps": -0.4777836203575134,
+    "last20_altitude_min_max_m": [
+      23.974910736083984,
+      30.971464157104492
+    ],
+    "last20_mean_abs_vy_mps": 0.3571559190750122
+  },
+  {
+    "seed": 2099,
+    "outcome": 3,
+    "final_altitude_m": 24.504013061523438,
+    "final_vy_mps": -0.26805269718170166,
+    "last20_altitude_min_max_m": [
+      24.504013061523438,
+      31.937061309814453
+    ],
+    "last20_mean_abs_vy_mps": 0.3778441548347473
+  }
+]

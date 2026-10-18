@@ -1110,3 +1110,47 @@ def test_kaggle_config_is_exact_no_bc_and_keeps_gate(tmp_path):
             smoke_success_rate=cfg.smoke_success_rate,
         )
     assert not list(tmp_path.iterdir())
+
+
+def test_checkpoint_snapshots_keep_one_schedule_and_save_steps(tmp_path):
+    from train import TrainingBindings, run_experiment
+
+    body, vehicle = parameters()
+    config = PPOConfig(
+        num_envs=2, num_steps=4, total_steps=24, num_minibatches=1, update_epochs=1
+    )
+    env = FakeEnv()
+    key = jax.random.key(42)
+    whole = make_train(env, config)(key, body, vehicle)
+    split = make_train(env, config, checkpoint_steps=(8, 16))(key, body, vehicle)
+    for left, right in zip(
+        jax.tree_util.tree_leaves(
+            (whole.runner.train_state, whole.runner.obs_stats, whole.metrics)
+        ),
+        jax.tree_util.tree_leaves(
+            (split.runner.train_state, split.runner.obs_stats, split.metrics)
+        ),
+    ):
+        np.testing.assert_allclose(left, right, rtol=1e-5, atol=1e-6)
+    np.testing.assert_array_equal(
+        jax.random.key_data(whole.runner.key), jax.random.key_data(split.runner.key)
+    )
+    assert [int(s.train_state.step) for s in split.checkpoints] == [1, 2]
+    assert int(split.runner.train_state.step) == 3
+    for invalid in ((16, 8), (8, 8), (3,), (24,), (0,)):
+        with pytest.raises(ValueError, match="rollout boundaries"):
+            make_train(env, config, checkpoint_steps=invalid)
+    bindings = TrainingBindings(
+        env, body, vehicle, evaluate=lambda params, stats: {"count": float(stats.count)}
+    )
+    _, manifest = run_experiment(
+        bindings, config, output_root=tmp_path, checkpoint_steps=(8, 16)
+    )
+    assert manifest["actual_steps"] == 24
+    assert set(manifest["snapshots"]) == {"8", "16"}
+    for step, run_dir in manifest["snapshots"].items():
+        saved = json.loads((Path(run_dir) / "manifest.json").read_text())
+        assert saved["actual_steps"] == int(step)
+        assert saved["config"]["ppo"]["total_steps"] == 24
+        assert saved["evaluation"]["count"] == 2 + int(step)
+        assert Path(saved["run"]["checkpoint_path"]).is_dir()
