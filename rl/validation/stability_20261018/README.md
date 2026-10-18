@@ -4,7 +4,8 @@ The W3 frozen evaluations meet the stated Gate 2 point-estimate threshold of
 50% for all three training seeds: **100%, 99%, and 54%**. Near-perfect performance
 is **not robust across training seeds**. Seed 3's Wilson 95% interval is
 44.3–63.4%, and its validation performance stays near 50% through 600k steps.
-No merge, push, Kaggle launch, or three-seed full run was performed.
+No merge, push, Kaggle launch, or three-seed full run was performed in this audit.
+The follow-up PPO-only launch preparation is recorded below.
 
 ## Protocol and stability
 
@@ -96,6 +97,9 @@ The sampled comparison preserves the reset/sensor-key sequence and derives
 independent action keys by folding in a fixed value. This is a single sampled
 rollout per validation seed, not a multi-sample uncertainty estimate.
 All details are in [setup_audit.json](setup_audit.json).
+The deployed/demo policy should use deterministic clipped mean actions. The
+sampled-action gap was measured only on the old standalone checkpoint; it does
+not establish actuator-noise tolerance for the new snapshots.
 
 All 38 timeouts from the **old 300k checkpoint** were also replayed. They end
 0.305–33.492 m above ground; their final-20-second mean absolute vertical speeds
@@ -103,6 +107,33 @@ range 0.276–0.549 m/s. These support slow/hovering failure behavior, not unive
 stationary hover. [old_300k_timeouts.json](old_300k_timeouts.json) contains the
 per-seed final states and recent altitude ranges. Those 38 trajectories were
 not among the original five plots, which showed two landings and three crashes.
+
+## Seed 3 contact diagnosis (saved trajectories only)
+
+[Touchdown histogram and trajectories](seed3/touchdown.png) and
+[per-episode measurements](seed3/touchdown.json) come from all 100 existing W3
+Parquet files. No new evaluation or checkpoint selection was performed. Contact
+means the first terminal RK4 sample (altitude clamped to terrain), not an
+interpolated impact within a simulation step.
+
+All **46 crashes fail only the vertical threshold**; maximum crash |vx| is
+0.258 m/s, below the 0.5 m/s limit. Crash |vy| ranges 1.085–6.746 m/s, with median
+**4.257 m/s** and 95th percentile 6.157 m/s. Only **6/46** are in [1,2) m/s;
+**21/46** are in [2,5), and **19/46** are at least 5 m/s. This is predominantly
+insufficient braking during final descent, rather than a slight threshold miss.
+
+Crash contact occurs at 78.75–93.09 s (median 85.34 s), versus soft landings at
+86.44–175.69 s (median 126.29 s). At the first descending crossing of 500 m,
+median |vy| is similar: crash 27.37 vs soft 26.94 m/s. At 100 m it is 12.23 vs
+9.72; at 30 m, 7.58 vs 3.29; at 10 m, 5.84 vs 1.00. The groups separate during
+final descent, already visibly by 100 m. These are retrospective associations,
+not proof of a local optimum or the exact causal onset of failure.
+
+Decision: report the seed dependence and preserve this reward for the PPO-only
+ablation. Do not use this frozen-seed diagnosis to select a reward adjustment.
+Three PPO seeds sharing one BC checkpoint do not measure BC training variance.
+The descriptive mean is 84.3%, only alongside 100/99/54%; no CI on that mean is
+claimed from these three partially independent training runs.
 
 ## Reward and remaining gates
 
@@ -119,20 +150,41 @@ above_target**. Its dense-shaping/terminal ratios range 1.327–1.497, average
 1.393, and end at 1.394605. Deterministic validation gives 1.401677. This is the
 absolute sum of mean episode velocity/altitude/fuel/angle totals divided by 100,
 not the added potential term alone. The PLAN .2–1 magnitude target remains unmet;
-the audit did not silently rescale rewards or edit `env/`.
+weights were deliberately not rescaled. This deviation is explicit in the YAML.
+The audit did not edit `env/`. W3 baseline reward totals must not be compared
+directly with shaped training reward totals.
 
 The honest method label is **PPO fine-tuned from a behavior-cloned PD controller**.
 The existing PPO-only result at 500k remains **0 / 64 / 36 on validation seeds**;
 it is not a frozen-test result and not a 2M-step ablation. Both Kaggle arms remain
-pending. The no-BC config retains a null smoke-success value, so the BC result
-cannot be used to bypass the no-BC gate. Do not claim PPO-from-scratch success or
-the three-seed 2M ablation has been completed.
+pending at audit completion. On 2026-10-18 the user explicitly authorized:
+"Waive it for the PPO-only ablation only, and make the waiver explicit in code
+and in the record." The no-BC config keeps null smoke success and now supplies
+`user-approved-2026-10-18-ppo-only-2m`. `train.check_smoke_gate` limits that
+exception to no-BC Europa/profile-shaping runs, seeds 1–3, 2M steps, 128x125
+rollouts and potential scale 100. Manifests record the waiver, its reason, and
+the failed prior smoke counts; they never claim a smoke pass. Other full runs
+retain the gate. Do not claim PPO-from-scratch success or a completed 2M ablation
+until its actual results are available.
+
+Resume wording: "PPO fine-tuned from a behavior-cloned PD controller, with shaped
+reward: 100 / 99 / 54% frozen-seed success across 3 training seeds (deterministic
+policy)." This is frozen-seed evaluation, not a pristine held-out test set.
+
+`rl.prepare_kaggle_ablation` builds a notebook containing only tracked source
+and config files with SHA256 provenance, without pushing this branch. The
+`rl.kaggle_ablation` launcher trains seeds 1–3 on at most two GPUs, then evaluates
+the predeclared final 2M checkpoints through W3. It saves logs, manifests, package
+versions, SQLite, all 300 trajectories, and a downloadable output ZIP. It refuses
+to launch full training outside Kaggle or overwrite an existing run directory.
 
 ## Reproduction and checks
 
 ```powershell
 uv run --frozen python -u -m rl.stability_europa --output-dir ckpts/europa_stability_repeat
 uv run --frozen python -m rl.audit_bc --run-dir ckpts/europa_bc_validation_20261018/checkpoints/ppo-europa-1-20261017T184030-cc37a51a --output ckpts/setup_audit_repeat.json
+uv run --with matplotlib python -m rl.diagnose_touchdown
+uv run python -m rl.prepare_kaggle_ablation
 ```
 
 The first command performs only the bounded three-seed protocol above, including
@@ -148,3 +200,8 @@ code and passed. `uv run ruff check rl/ train.py tests/test_rl.py` and
 `git diff --check` passed. The source diff since the merged base `4b2a1eb` is
 confined to `rl/`, `train.py`, and `tests/test_rl.py`; `env/`, `eval/`, `storage/`,
 and top-level `configs/` are unchanged.
+
+Follow-up verification after the seed-3 diagnosis and scoped waiver changes:
+`uv run pytest` passed **120 tests, 1 existing Orbax warning in 189.62 s**.
+Scoped Ruff and diff checks passed. Generated notebook code cells parse, required
+source files are bundled, and the launcher command dry-run performs no training.

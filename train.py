@@ -218,6 +218,41 @@ def _jsonable(value):
     return value
 
 
+PPO_ONLY_ABLATION_WAIVER = "user-approved-2026-10-18-ppo-only-2m"
+
+
+def check_smoke_gate(
+    bindings, config, *, seed, body_name, vehicle_name, bc_init,
+    smoke_success_rate, ppo_only_ablation_waiver=None,
+):
+    """Keep the full-run gate except for the explicitly authorized negative ablation."""
+    if ppo_only_ablation_waiver is not None:
+        if not (
+            ppo_only_ablation_waiver == PPO_ONLY_ABLATION_WAIVER
+            and bc_init is None
+            and body_name == "europa" and vehicle_name == "europa_lander"
+            and seed in (1, 2, 3)
+            and config.total_steps == 2_000_000
+            and config.num_envs == 128 and config.num_steps == 125
+            and bindings.reward_id == "hand_shaped_potential_profile_v1"
+            and float(bindings.vehicle_params.get("reward_mode", -1)) == 1
+            and float(bindings.vehicle_params.get("reward_potential_scale", -1)) == 100
+        ):
+            raise ValueError("PPO-only ablation waiver is outside its authorized scope")
+        return {
+            "status": "waived_for_ppo_only_ablation",
+            "authorization": PPO_ONLY_ABLATION_WAIVER,
+            "reason": "User explicitly waived >10% gate for the PPO-only 2M ablation, seeds 1-3",
+            "prior_no_bc_validation": {"steps": 500_000, "soft": 0, "crash": 64, "timeout": 36},
+            "smoke_passed": False,
+        }
+    if config.total_steps > 1_000_000 and (
+        smoke_success_rate is None or not 0.1 < smoke_success_rate <= 1.0
+    ):
+        raise ValueError("A full run requires a prior smoke_success_rate > 0.10 (and <= 1)")
+    return {"status": "passed" if config.total_steps > 1_000_000 else "bounded_run"}
+
+
 def run_experiment(
     bindings,
     config,
@@ -229,19 +264,19 @@ def run_experiment(
     smoke_success_rate=None,
     bc_init=None,
     checkpoint_steps=(),
+    ppo_only_ablation_waiver=None,
 ):
     """Train, checkpoint, log diagnostics, and invoke supplied integration hooks.
 
     Without hooks, the manifest/printed summary explicitly mark DB/evaluation
     pending; a fake-env test is never reported as a planetary landing result.
-    Full runs require evidence from a prior smoke evaluation (>10% success).
+    Full runs require >10% smoke success, except the recorded PPO-only ablation waiver.
     """
-    if config.total_steps > 1_000_000 and (
-        smoke_success_rate is None or not 0.1 < smoke_success_rate <= 1.0
-    ):
-        raise ValueError(
-            "A full run requires a prior smoke_success_rate > 0.10 (and <= 1)"
-        )
+    smoke_gate = check_smoke_gate(
+        bindings, config, seed=seed, body_name=body_name, vehicle_name=vehicle_name,
+        bc_init=bc_init, smoke_success_rate=smoke_success_rate,
+        ppo_only_ablation_waiver=ppo_only_ablation_waiver,
+    )
     actor_init, obs_stats_init, init_metadata = None, None, None
     if bc_init is not None:
         from rl.bc_pretrain import load_bc_checkpoint
@@ -277,6 +312,7 @@ def run_experiment(
             "shaping_components": bindings.shaping_components,
             "per_env_params": bindings.per_env_params,
             "smoke_success_rate": smoke_success_rate,
+            "smoke_gate": smoke_gate,
             "evaluation": bindings.evaluation_config,
             "actor_initialization": init_metadata,
             "checkpoint_steps": list(checkpoint_steps),
@@ -448,6 +484,7 @@ def main(cfg: DictConfig):
         smoke_success_rate=cfg.get("smoke_success_rate"),
         bc_init=cfg.get("bc_init"),
         checkpoint_steps=tuple(cfg.get("checkpoint_steps", ())),
+        ppo_only_ablation_waiver=cfg.get("ppo_only_ablation_waiver"),
     )
 
 

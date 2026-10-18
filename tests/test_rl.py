@@ -1089,10 +1089,10 @@ def test_bc_collection_labels_and_fit():
     assert float(jnp.square(mean - 0.25 * jnp.tanh(held[:, :2])).mean()) < 0.005
 
 
-def test_kaggle_config_is_exact_no_bc_and_keeps_gate(tmp_path):
+def test_kaggle_config_is_exact_no_bc_and_waiver_is_scoped(tmp_path):
     from omegaconf import OmegaConf
 
-    from train import lander_bindings, run_experiment
+    from train import check_smoke_gate, lander_bindings, run_experiment
 
     cfg = OmegaConf.load(
         Path(__file__).resolve().parents[1] / "rl/configs/kaggle_europa_2m.yaml"
@@ -1110,6 +1110,29 @@ def test_kaggle_config_is_exact_no_bc_and_keeps_gate(tmp_path):
             smoke_success_rate=cfg.smoke_success_rate,
         )
     assert not list(tmp_path.iterdir())
+    arguments = {
+        "seed": 1, "body_name": "europa", "vehicle_name": "europa_lander", "bc_init": None,
+        "smoke_success_rate": None, "ppo_only_ablation_waiver": cfg.ppo_only_ablation_waiver,
+    }
+    for seed in (1, 2, 3):
+        record = check_smoke_gate(bindings, config, **{**arguments, "seed": seed})
+        assert record["status"] == "waived_for_ppo_only_ablation"
+        assert record["smoke_passed"] is False
+        assert record["prior_no_bc_validation"]["soft"] == 0
+    for change in (
+        {"bc_init": "actor_init.msgpack"}, {"seed": 4}, {"body_name": "moon"},
+        {"vehicle_name": "other"}, {"ppo_only_ablation_waiver": True},
+    ):
+        with pytest.raises(ValueError, match="outside its authorized scope"):
+            check_smoke_gate(bindings, config, **{**arguments, **change})
+    from dataclasses import replace
+
+    for altered in (replace(config, total_steps=3_000_000), replace(config, num_envs=16)):
+        with pytest.raises(ValueError, match="outside its authorized scope"):
+            check_smoke_gate(bindings, altered, **arguments)
+    baseline = lander_bindings(OmegaConf.create({"reward": {"mode": "baseline"}}))
+    with pytest.raises(ValueError, match="outside its authorized scope"):
+        check_smoke_gate(baseline, config, **arguments)
 
 
 def test_checkpoint_snapshots_keep_one_schedule_and_save_steps(tmp_path):
