@@ -17,11 +17,10 @@ import math
 
 import jax
 import jax.numpy as jnp
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from env.dynamics import compute_acceleration, step_dynamics_rk4, G0, NUM_SUBSTEPS
+from env.dynamics import step_dynamics_rk4, G0
 
 
 # ---------------------------------------------------------------------------

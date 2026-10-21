@@ -23,10 +23,7 @@ import json
 from pathlib import Path
 import shutil
 import sqlite3
-import sys
 from typing import Any, Sequence
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 from storage.db import (
     get_best_run_for_body,
@@ -34,13 +31,11 @@ from storage.db import (
     get_run,
     get_vehicle,
     init_db,
-    insert_episode,
-    insert_eval,
-    insert_run,
     upsert_body,
     upsert_vehicle,
 )
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_SOURCE_DB = _REPO_ROOT / "data" / "rlander.db"
 _DEFAULT_OUTPUT_DIR = _REPO_ROOT / "app" / "demo_data"
 

@@ -14,17 +14,16 @@ Contract requirements:
 from __future__ import annotations
 
 import argparse
-import json
-from pathlib import Path
 import sqlite3
-import sys
-from typing import Any, Callable, Sequence
+from collections.abc import Callable, Sequence
+from pathlib import Path
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import yaml
 
-from eval.metrics import aggregate_episodes, outcome_name, OUTCOME_LANDED
+from eval.metrics import aggregate_episodes, outcome_name
 from storage.db import (
     get_body,
     get_run,
@@ -161,6 +160,26 @@ def load_vehicle_config(
 # Policy builder
 # ---------------------------------------------------------------------------
 
+def _ppo_rollout_policy(obs, key, weights):
+    from rl.networks import policy_action
+    return policy_action(weights[0], weights[1], obs)
+
+
+def _pd_rollout_policy(obs, key, weights):
+    from rl.fallback import pd_action
+    return pd_action(obs, weights[0], weights[1])
+
+
+def _random_rollout_policy(obs, key, weights):
+    return jax.random.uniform(key, (2,), minval=-1.0, maxval=1.0)
+
+
+def _attach_rollout(policy, weights):
+    fn = lambda obs, key: policy(obs, key, weights)
+    fn.rollout_policy = policy
+    fn.rollout_weights = weights
+    return fn
+
 def make_policy_fn(
     policy_type: str,
     checkpoint_path: str | None = None,
@@ -185,7 +204,6 @@ def make_policy_fn(
         raise TypeError(f"custom_policy must be callable, got {type(custom_policy)}")
 
     if policy_type == "pd_fallback":
-        from rl.fallback import pd_action
         clean_body = {
             "g": float(body_params["g"]),
             "rho0": float(body_params["rho0"]),
@@ -201,11 +219,13 @@ def make_policy_fn(
             "twr_max": float(vehicle_params["twr_max"]),
             "min_throttle": float(vehicle_params["min_throttle"]),
         }
-        jitted_pd = jax.jit(pd_action)
-        return lambda obs, key: jitted_pd(obs, clean_body, clean_vehicle)
+        fn = _attach_rollout(_pd_rollout_policy, (clean_body, clean_vehicle))
+        jitted_pd = jax.jit(fn)
+        jitted_pd.rollout_policy, jitted_pd.rollout_weights = fn.rollout_policy, fn.rollout_weights
+        return jitted_pd
 
     if policy_type == "random":
-        return lambda obs, key: jax.random.uniform(key, (2,), minval=-1.0, maxval=1.0)
+        return _attach_rollout(_random_rollout_policy, ())
 
     if policy_type == "ppo" or checkpoint_path is not None:
         if not checkpoint_path:
@@ -218,7 +238,8 @@ def make_policy_fn(
 
         import orbax.checkpoint as ocp
         from flax import serialization
-        from rl.networks import ActorCritic, ObsStats, policy_action
+
+        from rl.networks import ObsStats
 
         with ocp.PyTreeCheckpointer() as checkpointer:
             restored = checkpointer.restore(str(ckpt_p))
@@ -235,8 +256,10 @@ def make_policy_fn(
         else:
             obs_stats = ObsStats.empty(8)
 
-        jitted_policy = jax.jit(lambda o: policy_action(params, obs_stats, o))
-        return lambda obs, key: jitted_policy(obs)
+        fn = _attach_rollout(_ppo_rollout_policy, (params, obs_stats))
+        jitted_policy = jax.jit(fn)
+        jitted_policy.rollout_policy, jitted_policy.rollout_weights = fn.rollout_policy, fn.rollout_weights
+        return jitted_policy
 
     raise ValueError(f"Unknown policy_type: {policy_type!r}")
 
@@ -257,6 +280,8 @@ def run_evaluation(
     seeds: Sequence[int] = range(10000, 10100),
     traj_base_dir: str | None = None,
     quiet: bool = False,
+    sensor_noise_scale: float = 1.0,
+    batched: bool = False,
 ) -> dict[str, Any]:
     """Execute deterministic evaluation on frozen seeds, writing to DB and Parquet.
 
@@ -272,11 +297,16 @@ def run_evaluation(
         seeds:            Frozen seeds sequence (default 10000..10099, 100 episodes).
         traj_base_dir:    Base dir for Parquet trajectories (default data/trajectories).
         quiet:            If True, suppress stdout summary.
+        sensor_noise_scale: 0 disables sensors for a labeled diagnostic; default 1.
+        batched: Compile all episodes together; keep the serial path as a reference.
 
     Returns:
         Dict of evaluation metrics and run info.
     """
     from env.lander_env import LanderEnv
+
+    if sensor_noise_scale not in (0.0, 1.0):
+        raise ValueError("sensor_noise_scale must be 0 (diagnostic) or 1 (normal)")
 
     close_conn_on_exit = False
     if conn is None:
@@ -297,6 +327,8 @@ def run_evaluation(
         # Load configs
         body_config = load_body_config(target_body, conn=conn)
         vehicle_config = load_vehicle_config(vehicle_name, conn=conn)
+        # Do not persist a diagnostic switch as the shared vehicle definition.
+        simulation_vehicle = dict(vehicle_config, sensor_noise_scale=sensor_noise_scale)
 
         # Upsert body & vehicle into DB to guarantee foreign keys
         upsert_body(conn, target_body, body_config)
@@ -317,74 +349,82 @@ def run_evaluation(
         episode_records: list[dict[str, Any]] = []
         term_reward_accumulators: dict[str, list[float]] = {}
 
-        for seed in seeds:
-            seed_key = jax.random.key(seed)
-            reset_key, sim_key = jax.random.split(seed_key)
+        batch, execution = None, None
+        if batched:
+            from eval.batched import collect
+            batch, execution = collect(policy_fn, seeds, body_config, simulation_vehicle)
 
-            obs, state = LanderEnv.reset(reset_key, body_config, vehicle_config)
+        for index, seed in enumerate(seeds):
+            if batch is not None:
+                steps, ep_component_sums, last_info = batch[index]
+            else:
+                seed_key = jax.random.key(seed)
+                reset_key, sim_key = jax.random.split(seed_key)
 
-            # Prepend initial state at t=0
-            steps: list[dict[str, float]] = [{
-                "t": float(state.t),
-                "x": float(state.x),
-                "y": float(state.y),
-                "vx": float(state.vx),
-                "vy": float(state.vy),
-                "mass": float(state.mass),
-                "throttle": 0.0,
-                "angle": 0.0,
-                "reward": 0.0,
-            }]
+                obs, state = LanderEnv.reset(reset_key, body_config, simulation_vehicle)
 
-            done = False
-            last_info: dict[str, Any] | None = None
-            ep_component_sums: dict[str, Any] = {}
-            step_records = []
+                # Prepend initial state at t=0
+                steps: list[dict[str, float]] = [{
+                    "t": float(state.t),
+                    "x": float(state.x),
+                    "y": float(state.y),
+                    "vx": float(state.vx),
+                    "vy": float(state.vy),
+                    "mass": float(state.mass),
+                    "throttle": 0.0,
+                    "angle": 0.0,
+                    "reward": 0.0,
+                }]
 
-            while not done:
-                sim_key, act_key, step_key = jax.random.split(sim_key, 3)
-                action = policy_fn(obs, act_key)
+                done = False
+                last_info: dict[str, Any] | None = None
+                ep_component_sums: dict[str, Any] = {}
+                step_records = []
 
-                obs, next_state, reward_components, done_flag, info = jitted_step(
-                    state, action, step_key
-                )
-                done = bool(done_flag)
-                last_info = info
+                while not done:
+                    sim_key, act_key, step_key = jax.random.split(sim_key, 3)
+                    action = policy_fn(obs, act_key)
 
-                step_reward = sum(reward_components.values())
-                for term_name, val in reward_components.items():
-                    ep_component_sums[term_name] = (
-                        ep_component_sums.get(term_name, 0.0) + val
+                    obs, next_state, reward_components, done_flag, info = jitted_step(
+                        state, action, step_key
                     )
+                    done = bool(done_flag)
+                    last_info = info
 
-                step_records.append((
-                    next_state.t, next_state.x, next_state.y,
-                    next_state.vx, next_state.vy, next_state.mass,
-                    action[0], action[1], step_reward,
-                ))
-                state = next_state
+                    step_reward = sum(reward_components.values())
+                    for term_name, val in reward_components.items():
+                        ep_component_sums[term_name] = (
+                            ep_component_sums.get(term_name, 0.0) + val
+                        )
 
-            # Convert episode step arrays to host in one batch call
-            host_records = jax.device_get(step_records)
-            min_thr = float(state.min_throttle)
-            gimbal_lim = float(state.gimbal_limit_rad)
+                    step_records.append((
+                        next_state.t, next_state.x, next_state.y,
+                        next_state.vx, next_state.vy, next_state.mass,
+                        action[0], action[1], step_reward,
+                    ))
+                    state = next_state
 
-            for rec in host_records:
-                raw_throttle = float(rec[6])
-                raw_angle = float(rec[7])
-                phys_throttle = min_thr + (1.0 - min_thr) * (raw_throttle + 1.0) / 2.0
-                thrust_angle = raw_angle * gimbal_lim
-                steps.append({
-                    "t": float(rec[0]),
-                    "x": float(rec[1]),
-                    "y": float(rec[2]),
-                    "vx": float(rec[3]),
-                    "vy": float(rec[4]),
-                    "mass": float(rec[5]),
-                    "throttle": float(phys_throttle),
-                    "angle": float(thrust_angle),
-                    "reward": float(rec[8]),
-                })
+                # Convert episode step arrays to host in one batch call
+                host_records = jax.device_get(step_records)
+                min_thr = float(state.min_throttle)
+                gimbal_lim = float(state.gimbal_limit_rad)
+
+                for rec in host_records:
+                    raw_throttle = float(rec[6])
+                    raw_angle = float(rec[7])
+                    phys_throttle = min_thr + (1.0 - min_thr) * (raw_throttle + 1.0) / 2.0
+                    thrust_angle = raw_angle * gimbal_lim
+                    steps.append({
+                        "t": float(rec[0]),
+                        "x": float(rec[1]),
+                        "y": float(rec[2]),
+                        "vx": float(rec[3]),
+                        "vy": float(rec[4]),
+                        "mass": float(rec[5]),
+                        "throttle": float(phys_throttle),
+                        "angle": float(thrust_angle),
+                        "reward": float(rec[8]),
+                    })
 
             for term_name, total_val in ep_component_sums.items():
                 term_reward_accumulators.setdefault(term_name, []).append(
@@ -421,6 +461,14 @@ def run_evaluation(
             term: {"mean": sum(vals) / len(vals)}
             for term, vals in term_reward_accumulators.items()
         }
+        # The SQL columns are NOT NULL legacy episode-final statistics. Store
+        # truthful nullable contact statistics alongside their explicit scope.
+        term_stats["_evaluation"] = {
+            "touchdown": agg_stats["touchdown"],
+            "by_outcome": agg_stats["by_outcome"],
+            "legacy_velocity_scope": agg_stats["legacy_velocity_scope"],
+            "sensor_noise_scale": sensor_noise_scale,
+        }
 
         eval_id = insert_eval(
             conn,
@@ -439,6 +487,8 @@ def run_evaluation(
         )
 
         result = {
+            "execution": execution,
+            "rollout_mode": "batched_compiled" if batched else "serial_reference",
             "eval_id": eval_id,
             "run_id": run_id,
             "eval_body": target_body,
@@ -453,6 +503,10 @@ def run_evaluation(
             "vx_mean": agg_stats["vx_mean"],
             "vx_std": agg_stats["vx_std"],
             "fuel_mean": agg_stats["fuel_mean"],
+            "touchdown": agg_stats["touchdown"],
+            "by_outcome": agg_stats["by_outcome"],
+            "legacy_velocity_scope": agg_stats["legacy_velocity_scope"],
+            "sensor_noise_scale": sensor_noise_scale,
             "episodes": episode_records,
             "term_stats": term_stats,
         }
@@ -463,8 +517,13 @@ def run_evaluation(
             print(f"RLander Evaluation Summary — Run {run_id} on {target_body}{ood_flag}")
             print(f"Episodes:     {result['n_episodes']} (seeds {seeds[0]}..{seeds[-1]})")
             print(f"Success rate: {result['success_rate']:.1%} (Wilson 95% CI: [{result['ci95_low']:.1%}, {result['ci95_high']:.1%}])")
-            print(f"Touchdown vy: {result['vy_mean']:.2f} ± {result['vy_std']:.2f} m/s")
-            print(f"Touchdown vx: {result['vx_mean']:.2f} ± {result['vx_std']:.2f} m/s")
+            contact = result["touchdown"]
+            print(f"Contacts:     {contact['n_episodes']}; timeouts excluded from touchdown stats")
+            if contact["n_episodes"]:
+                print(f"Touchdown vy: {contact['vy_mean']:.2f} ± {contact['vy_std']:.2f} m/s")
+                print(f"Touchdown vx: {contact['vx_mean']:.2f} ± {contact['vx_std']:.2f} m/s")
+            else:
+                print("Touchdown:    n/a (no ground contacts)")
             print(f"Fuel used:    {result['fuel_mean']:.1f} kg")
             print(f"Stored eval:  eval_id={eval_id} in SQLite")
             print("=" * 60)

@@ -15,14 +15,17 @@ import zipfile
 from pathlib import Path
 
 
-def prepare(output):
+def source_bundle(extra_files=()):
     root = Path(__file__).resolve().parents[1]
     tracked = subprocess.check_output(["git", "ls-files"], cwd=root, text=True).splitlines()
     files = sorted(p for p in tracked if (
         p in ("train.py", "uv.lock")
-        or (p.endswith((".py", ".yaml")) and p.split("/")[0] in
+        or (p.endswith((".py", ".yaml","sql")) and p.split("/")[0] in
             ("env", "rl", "eval", "storage", "configs"))
     ))
+    # Runtime dependencies must be bundled even before newly added files are
+    # committed; train.py and the batched W3 path import these modules.
+    files = sorted(set(files) | set(extra_files) | {"rl/execution.py", "eval/batched.py"})
     versions = {}
     for package in tomllib.loads((root / "uv.lock").read_text())["package"]:
         versions.setdefault(package["name"], set()).add(package["version"])
@@ -46,6 +49,11 @@ def prepare(output):
         bundle.writestr("source_manifest.json", json.dumps(source, indent=2))
     payload = archive.getvalue()
     digest = hashlib.sha256(payload).hexdigest()
+    return payload, digest, source, requirements
+
+
+def prepare(output):
+    payload, digest, source, requirements = source_bundle()
 
     def cell(kind, text):
         result = {"cell_type": kind, "metadata": {}, "source": text.splitlines(keepends=True)}
@@ -97,7 +105,7 @@ for row in report['frozen']:
     }, indent=2), encoding="utf-8")
     (output / "source.zip").write_bytes(payload)
     (output / "source_manifest.json").write_text(json.dumps(source, indent=2) + "\n")
-    print(f"Prepared {len(files)} source files; archive SHA256 {digest}")
+    print(f"Prepared {len(source['files'])} source files; archive SHA256 {digest}")
 
 
 if __name__ == "__main__":

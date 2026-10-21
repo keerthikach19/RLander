@@ -12,11 +12,8 @@ All tests use :memory: for SQLite and tmp_path for Parquet I/O.
 from __future__ import annotations
 
 import json
-import math
-import os
 import sqlite3
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -38,16 +35,10 @@ from eval.metrics import (
     OUTCOME_TIMEOUT,
 )
 from storage.db import (
-    get_all_bodies,
-    get_all_evals,
-    get_all_vehicles,
-    get_best_run_for_body,
     get_body,
     get_episodes_for_run,
     get_evals_for_run,
     get_run,
-    get_runs,
-    get_vehicle,
     init_db,
     insert_episode,
     insert_eval,
@@ -66,7 +57,6 @@ from eval.run_eval import (
     load_body_config,
     load_vehicle_config,
     main as run_eval_main,
-    make_policy_fn,
     run_evaluation,
 )
 from scripts.export_demo_data import (
@@ -437,7 +427,7 @@ class TestParquetIO:
             _fake_step(t=i * 0.1, y=float(2000 - i * 5))
             for i in range(50)
         ]
-        rel = f"data/trajectories/99/10000.parquet"
+        rel = "data/trajectories/99/10000.parquet"
         # Override _REPO_ROOT for test by writing to tmp_path
         abs_path = tmp_path / "data" / "trajectories" / "99" / "10000.parquet"
         abs_path.parent.mkdir(parents=True, exist_ok=True)

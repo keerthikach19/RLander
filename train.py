@@ -55,28 +55,9 @@ class TrainingBindings:
     evaluation_config: dict | None = None
 
 
-def evaluate_smoke(
-    env,
-    body_params,
-    vehicle_params,
-    params,
-    obs_stats,
-    *,
-    seeds=tuple(range(10_000, 10_100)),
-    max_steps=1024,
-    policy_fn=None,
-    policy_label="deterministic_mean",
-):
-    """Temporary W2 smoke summary until W3's evaluation pipeline is merged.
-
-    Success is determined only from terminal info and body.success (§5.6),
-    independently of rewards. Each frozen seed has its own reset/noise stream;
-    episodes stop at their first done and never auto-reset during evaluation.
-    """
-    if not seeds or max_steps < 1:
-        raise ValueError("Evaluation needs seeds and a positive max_steps")
-
-    def episode(seed):
+def make_smoke_rollout(env, body_params, vehicle_params, *, max_steps=1024,
+                       policy_fn=None, sample_actions=False):
+    def episode(seed, params, obs_stats):
         key, reset_key = jax.random.split(jax.random.key(seed))
         obs, state = env.reset(reset_key, body_params, vehicle_params)
         shapes = jax.eval_shape(env.step, state, jnp.zeros(2), key)
@@ -92,6 +73,13 @@ def evaluate_smoke(
                 if policy_fn is None
                 else policy_fn(obs)
             )
+            if sample_actions:
+                from rl.networks import ActorCritic, normalize_obs, sample_action
+
+                mean, log_std, _ = ActorCritic().apply(params, normalize_obs(obs, obs_stats))
+                # Preserve reset/sensor keys across mean and sampled comparisons.
+                action_key = jax.random.fold_in(step_key, 0x53414D50)
+                action = jnp.clip(sample_action(action_key, mean, log_std)[0], -1, 1)
             obs, state, components, done, info = env.step(state, action, step_key)
             totals = jax.tree_util.tree_map(jnp.add, totals, components)
             return obs, state, key, done, count + 1, totals, info
@@ -117,9 +105,44 @@ def evaluate_smoke(
             "final_observation": final_obs,
         }
 
-    episodes = jax.device_get(
-        jax.jit(jax.vmap(episode))(jnp.asarray(seeds, dtype=jnp.uint32))
+    return jax.jit(jax.vmap(episode, in_axes=(0, None, None)))
+
+
+def evaluate_smoke(
+    env,
+    body_params,
+    vehicle_params,
+    params,
+    obs_stats,
+    *,
+    seeds=tuple(range(10_000, 10_100)),
+    max_steps=1024,
+    policy_fn=None,
+    policy_label="deterministic_mean",
+    sample_actions=False,
+    _rollout=None,
+):
+    """Temporary W2 smoke summary until W3's evaluation pipeline is merged.
+
+    Success is determined only from terminal info and body.success (§5.6),
+    independently of rewards. Each frozen seed has its own reset/noise stream;
+    episodes stop at their first done and never auto-reset during evaluation.
+    """
+    if not seeds or max_steps < 1:
+        raise ValueError("Evaluation needs seeds and a positive max_steps")
+    if sample_actions and policy_fn is not None:
+        raise ValueError("Sampled evaluation requires PPO parameters, not a custom policy")
+
+    from rl.execution import execute
+    rollout = _rollout or make_smoke_rollout(
+        env, body_params, vehicle_params, max_steps=max_steps,
+        policy_fn=policy_fn, sample_actions=sample_actions,
     )
+    device_episodes, execution = execute(
+        rollout, (jnp.asarray(seeds, dtype=jnp.uint32), params, obs_stats),
+        label="validation_" + policy_label,
+    )
+    episodes = jax.device_get(device_episodes)
     if not np.asarray(episodes["finished"]).all():
         raise RuntimeError("Smoke evaluation exceeded max_steps before env termination")
     info = episodes["info"]
@@ -130,6 +153,7 @@ def evaluate_smoke(
 
     return {
         "evaluation_type": "smoke",
+        "execution": execution,
         "policy": policy_label,
         "seeds": list(seeds),
         "n_episodes": len(seeds),
@@ -176,8 +200,10 @@ def lander_bindings(cfg):
     if set(reward_cfg) - {"mode", "potential_scale"}:
         raise ValueError("reward accepts only mode and potential_scale; gamma uses PPO")
     mode = reward_cfg.get("mode", "baseline")
-    if mode not in ("baseline", "potential_profile"):
-        raise ValueError("reward.mode must be baseline or potential_profile")
+    modes = {"baseline": 0, "potential_profile": 1, "landing_profile": 2,
+             "landing_success": 3, "landing_margin": 4, "landing_vertical": 5}
+    if mode not in modes:
+        raise ValueError(f"reward.mode must be one of {tuple(modes)}")
     scale = float(reward_cfg.get("potential_scale", 20.0))
     if not math.isfinite(scale) or scale < 0:
         raise ValueError("reward.potential_scale must be finite and nonnegative")
@@ -185,7 +211,7 @@ def lander_bindings(cfg):
     if not 0 <= gamma <= 1:
         raise ValueError("PPO gamma must be in [0, 1]")
     vehicle.update(
-        reward_mode=jnp.float32(mode == "potential_profile"),
+        reward_mode=jnp.float32(modes[mode]),
         reward_gamma=jnp.float32(gamma),
         reward_potential_scale=jnp.float32(scale),
     )
@@ -195,13 +221,14 @@ def lander_bindings(cfg):
     if seed_start < 0 or episodes < 1 or seed_start + episodes > 2**32:
         raise ValueError("Evaluation needs a nonempty uint32 seed range")
     seeds = tuple(range(seed_start, seed_start + episodes))
+    rollout = make_smoke_rollout(LanderEnv(), body, vehicle)
     return TrainingBindings(
         LanderEnv(),
         body,
         vehicle,
         shaping_components=("velocity", "altitude", "fuel", "angle"),
         evaluate=lambda params, stats: evaluate_smoke(
-            LanderEnv(), body, vehicle, params, stats, seeds=seeds
+            LanderEnv(), body, vehicle, params, stats, seeds=seeds, _rollout=rollout
         ),
         reward_id=f"hand_shaped_{mode}_v1",
         evaluation_config={"seed_start": seed_start, "episodes": episodes},
@@ -253,6 +280,47 @@ def check_smoke_gate(
     return {"status": "passed" if config.total_steps > 1_000_000 else "bounded_run"}
 
 
+def load_ppo_initialization(checkpoint, *, body_name, vehicle_name, initial_log_std):
+    """Import actor, critic and normalization; explicitly reset exploration.
+
+    This is a new fine-tuning schedule, not an exact runner/optimizer resume.
+    Host-array checkpoints produced here are portable between CPU and GPU.
+    """
+    from rl.networks import ObsStats
+
+    checkpoint = Path(checkpoint).resolve()
+    parent = json.loads((checkpoint.parent / "manifest.json").read_text(encoding="utf-8"))
+    if (parent["config"]["body"], parent["config"]["vehicle"]) != (body_name, vehicle_name):
+        raise ValueError("PPO initialization body/vehicle does not match this run")
+    with ocp.PyTreeCheckpointer() as reader:
+        saved = reader.restore(str(checkpoint))
+    params = jax.tree_util.tree_map(jnp.asarray, saved["train_state"]["params"])
+    stats = serialization.from_state_dict(ObsStats.empty(), saved["obs_stats"])
+    stats = jax.tree_util.tree_map(jnp.asarray, stats)
+    if (stats.mean.shape != (8,) or stats.var.shape != (8,) or float(stats.count) <= 0
+            or not np.isfinite(float(stats.count))
+            or not np.isfinite(np.asarray(stats.mean)).all()
+            or not np.isfinite(np.asarray(stats.var)).all()
+            or np.any(np.asarray(stats.var) < 0)):
+        raise ValueError("Invalid PPO initialization observation statistics")
+    if not all(np.isfinite(np.asarray(v)).all() for v in jax.tree_util.tree_leaves(params)):
+        raise ValueError("PPO initialization parameters must be finite")
+    saved_log_std = np.asarray(params["params"]["log_std"]).tolist()
+    if initial_log_std is not None:
+        params = {**params, "params": {**params["params"], "log_std": jnp.full_like(
+            params["params"]["log_std"], initial_log_std
+        )}}
+    return params, stats, {
+        "method": "ppo_actor_critic_warm_start", "checkpoint": str(checkpoint),
+        "parent_run_id": parent["run"]["id"], "parent_steps": parent["actual_steps"],
+        "parent_reward_id": parent["run"]["reward_id"],
+        "parent_config_hash": parent["run"]["config_hash"],
+        "body": body_name, "vehicle": vehicle_name,
+        "saved_log_std": saved_log_std, "initial_log_std": initial_log_std,
+        "critic_restored": True, "optimizer_restored": False, "environment_restored": False,
+    }
+
+
 def run_experiment(
     bindings,
     config,
@@ -263,6 +331,7 @@ def run_experiment(
     output_root="ckpts",
     smoke_success_rate=None,
     bc_init=None,
+    ppo_init=None,
     checkpoint_steps=(),
     ppo_only_ablation_waiver=None,
 ):
@@ -272,12 +341,14 @@ def run_experiment(
     pending; a fake-env test is never reported as a planetary landing result.
     Full runs require >10% smoke success, except the recorded PPO-only ablation waiver.
     """
+    if ppo_init is not None and (bc_init is not None or ppo_only_ablation_waiver is not None):
+        raise ValueError("PPO initialization cannot use BC initialization or the from-scratch waiver")
     smoke_gate = check_smoke_gate(
         bindings, config, seed=seed, body_name=body_name, vehicle_name=vehicle_name,
         bc_init=bc_init, smoke_success_rate=smoke_success_rate,
         ppo_only_ablation_waiver=ppo_only_ablation_waiver,
     )
-    actor_init, obs_stats_init, init_metadata = None, None, None
+    actor_init, params_init, obs_stats_init, init_metadata = None, None, None, None
     if bc_init is not None:
         from rl.bc_pretrain import load_bc_checkpoint
 
@@ -287,6 +358,11 @@ def run_experiment(
             init_metadata["vehicle"],
         ):
             raise ValueError("BC checkpoint body/vehicle does not match this run")
+    if ppo_init is not None:
+        params_init, obs_stats_init, init_metadata = load_ppo_initialization(
+            ppo_init, body_name=body_name, vehicle_name=vehicle_name,
+            initial_log_std=config.initial_log_std,
+        )
     # The invariance argument requires the same discount in shaping and PPO.
     # Validate here as callers may build bindings and PPOConfig independently.
     if isinstance(bindings.vehicle_params, dict):
@@ -350,19 +426,28 @@ def run_experiment(
     with (run_dir / "metrics.jsonl").open("w", encoding="utf-8") as log:
         log.write(json.dumps({"event": "config", **manifest}, allow_nan=False) + "\n")
         log.flush()
-        result = make_train(
+        from rl.execution import event, execute
+        train_fn = make_train(
             bindings.env,
             config,
             shaping_components=bindings.shaping_components,
             per_env_params=bindings.per_env_params,
             checkpoint_steps=checkpoint_steps,
-        )(
+        )
+        result, execution = execute(train_fn, (
             jax.random.key(seed),
             bindings.body_params,
             bindings.vehicle_params,
             actor_init,
             obs_stats_init,
+            params_init,
+        ), label="ppo_training")
+        execution["environment_steps_per_execution_second"] = (
+            config.num_updates * config.batch_size / execution["execution_seconds"]
         )
+        manifest["execution"] = execution
+        write_manifest()
+        event("ppo_training", "writing_metrics_and_checkpoints_on_host")
         metrics = jax.device_get(result.metrics)
         for index in range(config.num_updates):
             row = _jsonable(jax.tree_util.tree_map(lambda x, i=index: x[i], metrics))
@@ -405,6 +490,7 @@ def run_experiment(
         manifest["database_status"] = "recorded"
         write_manifest()
     if bindings.evaluate is not None:
+        event("validation", "evaluating_final_checkpoint")
         manifest["evaluation"] = _jsonable(
             bindings.evaluate(runner.train_state.params, runner.obs_stats)
         )
@@ -413,6 +499,7 @@ def run_experiment(
         manifest["evaluation"] = {"status": "pending W3 evaluation adapter"}
     snapshot_paths = {}
     for step, snapshot in zip(checkpoint_steps, result.checkpoints):
+        event("validation", "saving_and_evaluating_snapshot", steps=step)
         snapshot_dir = run_dir / "snapshots" / str(step)
         snapshot_dir.mkdir(parents=True, exist_ok=False)
         snapshot_path = snapshot_dir / "checkpoint"
@@ -483,6 +570,7 @@ def main(cfg: DictConfig):
         output_root=cfg.get("output_root", "ckpts"),
         smoke_success_rate=cfg.get("smoke_success_rate"),
         bc_init=cfg.get("bc_init"),
+        ppo_init=cfg.get("ppo_init"),
         checkpoint_steps=tuple(cfg.get("checkpoint_steps", ())),
         ppo_only_ablation_waiver=cfg.get("ppo_only_ablation_waiver"),
     )

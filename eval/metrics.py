@@ -115,7 +115,7 @@ def episode_success(info: dict[str, Any]) -> bool:
 
 def aggregate_episodes(
     infos: Sequence[dict[str, Any]],
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Compute aggregate eval statistics over a list of episode-final infos.
 
     Each element of `infos` is the `info` dict from the *last* step of one
@@ -124,7 +124,9 @@ def aggregate_episodes(
     Returns a dict with:
         success_rate, ci95_low, ci95_high,
         vy_mean, vy_std, vx_mean, vx_std, fuel_mean,
-        n_episodes, n_success.
+        n_episodes, n_success, and touchdown/by_outcome summaries.
+    The legacy vy/vx fields remain ALL episode-final velocities for SQLite
+    compatibility. Only touchdown and landed/crashed groups describe contact.
     """
     n = len(infos)
     if n == 0:
@@ -154,6 +156,17 @@ def aggregate_episodes(
         variance = sum((x - m) ** 2 for x in xs) / len(xs)
         return math.sqrt(variance)
 
+    def summarize(rows):
+        vy = [float(row["touchdown_v"]) for row in rows]
+        vx = [float(row["touchdown_vx"]) for row in rows]
+        return {
+            "n_episodes": len(rows),
+            "vy_mean": _mean(vy) if rows else None,
+            "vy_std": _std(vy) if rows else None,
+            "vx_mean": _mean(vx) if rows else None,
+            "vx_std": _std(vx) if rows else None,
+        }
+
     return {
         "n_episodes":   float(n),
         "n_success":    float(successes),
@@ -165,4 +178,10 @@ def aggregate_episodes(
         "vx_mean":      _mean(vx_vals),
         "vx_std":       _std(vx_vals),
         "fuel_mean":    _mean(fuel_vals),
+        "touchdown": summarize([i for i in infos if int(i["outcome"]) in (1, 2)]),
+        "by_outcome": {
+            name: summarize([i for i in infos if int(i["outcome"]) == code])
+            for name, code in (("landed", 1), ("crashed", 2), ("timeout", 3))
+        },
+        "legacy_velocity_scope": "all_episode_final_states_including_timeouts",
     }

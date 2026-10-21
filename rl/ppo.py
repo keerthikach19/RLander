@@ -44,6 +44,9 @@ class PPOConfig:
     initial_action_mean: tuple[float, float] = (0.0, 0.0)
     initial_log_std: float = 0.0
     reward_scale: float = 1.0
+    freeze_obs_stats: bool = False
+    log_std_min: float | None = None
+    log_std_max: float | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "initial_action_mean", tuple(self.initial_action_mean))
@@ -55,6 +58,12 @@ class PPOConfig:
             )
         if not math.isfinite(self.initial_log_std):
             raise ValueError("initial_log_std must be finite")
+        for bound in (self.log_std_min, self.log_std_max):
+            if bound is not None and not math.isfinite(bound):
+                raise ValueError("log-std bounds must be finite or None")
+        if (self.log_std_min is not None and self.initial_log_std < self.log_std_min
+                or self.log_std_max is not None and self.initial_log_std > self.log_std_max):
+            raise ValueError("initial_log_std must lie within log-std bounds")
         if not math.isfinite(self.reward_scale) or self.reward_scale <= 0:
             raise ValueError("reward_scale must be finite and positive")
         for name in (
@@ -163,6 +172,17 @@ def ppo_loss(params, apply_fn, batch, config):
     }
 
 
+def project_log_std(params, config):
+    """Project stored Gaussian parameters so sampling and log-probs stay paired."""
+    if config.log_std_min is None and config.log_std_max is None:
+        return params
+    return {**params, "params": {**params["params"], "log_std": jnp.clip(
+        params["params"]["log_std"],
+        -jnp.inf if config.log_std_min is None else config.log_std_min,
+        jnp.inf if config.log_std_max is None else config.log_std_max,
+    )}}
+
+
 def make_train(
     env,
     config=None,
@@ -171,7 +191,7 @@ def make_train(
     per_env_params=False,
     checkpoint_steps=(),
 ):
-    """Build train(key, body, vehicle, actor_init=None, obs_stats_init=None).
+    """Build train(key, body, vehicle, actor_init=None, obs_stats_init=None, params_init=None).
 
     Numeric parameter pytrees are data arguments (shared by default, or batched
     on axis 0 with per_env_params=True). Component names are supplied explicitly
@@ -180,6 +200,8 @@ def make_train(
     Optional initialization imports only the actor MLP and paired normalization;
     critic, log-std, optimizer, RNG, and environments are initialized fresh.
     Optional checkpoint_steps retain complete runners on one continuous schedule.
+    params_init supports PPO weight warm starts with paired normalization; it
+    does not resume optimizer/RNG/environments or the parent's learning schedule.
     """
     config = PPOConfig() if config is None else config
     checkpoint_steps = tuple(checkpoint_steps)
@@ -208,9 +230,13 @@ def make_train(
         optax.adam(learning_rate, eps=1e-5),
     )
 
-    def train(key, body_params, vehicle_params, actor_init=None, obs_stats_init=None):
-        if (actor_init is None) != (obs_stats_init is None):
+    def train(key, body_params, vehicle_params, actor_init=None, obs_stats_init=None, params_init=None):
+        if actor_init is not None and params_init is not None:
+            raise ValueError("Choose actor-only initialization or full PPO parameters")
+        if ((actor_init is None and params_init is None) != (obs_stats_init is None)):
             raise ValueError("Actor init and its observation statistics must be paired")
+        if config.freeze_obs_stats and obs_stats_init is None:
+            raise ValueError("Frozen normalization requires initialized observation statistics")
         key, init_key, reset_key, shape_key = jax.random.split(key, 4)
         obs, env_state = reset_envs(
             env,
@@ -224,6 +250,15 @@ def make_train(
         params = network.init(init_key, jnp.zeros((8,), dtype=jnp.float32))
         if actor_init is not None:
             params = replace_actor(params, actor_init)
+        if params_init is not None:
+            if jax.tree_util.tree_structure(params) != jax.tree_util.tree_structure(params_init):
+                raise ValueError("PPO warm-start parameter tree does not match network")
+            if any(a.shape != b.shape for a, b in zip(
+                jax.tree_util.tree_leaves(params), jax.tree_util.tree_leaves(params_init)
+            )):
+                raise ValueError("PPO warm-start parameter shapes do not match network")
+            params = params_init
+        params = project_log_std(params, config)
         train_state = TrainState.create(
             apply_fn=network.apply, params=params, tx=optimizer
         )
@@ -360,7 +395,9 @@ def make_train(
                         config,
                     )
                     metrics["grad_norm"] = optax.tree.norm(grads)
-                    return train_state.apply_gradients(grads=grads), metrics
+                    updated = train_state.apply_gradients(grads=grads)
+                    updated = updated.replace(params=project_log_std(updated.params, config))
+                    return updated, metrics
 
                 train_state, metrics = jax.lax.scan(
                     minibatch_step, train_state, minibatches
@@ -382,10 +419,13 @@ def make_train(
             metrics.update(
                 env_steps=(iteration + 1) * config.batch_size,
                 learning_rate=learning_rate(iteration * updates_per_rollout),
+                action_std=jnp.exp(train_state.params["params"]["log_std"]),
                 episodes=count,
                 episode_length=rollout_data["completed_length"].sum()
                 / jnp.maximum(count, 1),
                 episode_return=sum(episode_means.values()),
+                soft_landing_rate=((rollout_data["outcome"] == 1) & rollout_data["done"]).sum()
+                / jnp.maximum(count, 1),
                 reward_components=episode_means,
                 landed=((rollout_data["outcome"] == 1) & rollout_data["done"]).sum(),
                 crashed=((rollout_data["outcome"] == 2) & rollout_data["done"]).sum(),
@@ -400,7 +440,7 @@ def make_train(
             runner = runner.replace(
                 train_state=train_state,
                 key=key,
-                obs_stats=update_obs_stats(
+                obs_stats=runner.obs_stats if config.freeze_obs_stats else update_obs_stats(
                     runner.obs_stats, rollout_data["raw_next_obs"]
                 ),
             )

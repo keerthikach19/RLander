@@ -26,10 +26,14 @@ import jax
 import jax.numpy as jnp
 
 from env.dynamics import step_dynamics_rk4
-from env.reward_shaping import profile_shaping
+from env.reward_shaping import (
+    landing_profile_reward,
+    profile_shaping,
+    success_contact_reward,
+    vertical_touchdown_reward,
+)
 from env.sensors import add_sensor_noise
 from env.terrain import terrain_height
-from env.reward_shaping import profile_shaping
 
 
 # ---------------------------------------------------------------------------
@@ -74,9 +78,10 @@ class EnvState(NamedTuple):
     vy_max_mps: jnp.ndarray
     vx_max_mps: jnp.ndarray
     # Optional reward settings; numeric data, never part of the dynamics.
-    reward_mode: jnp.ndarray  # 0 baseline (default), 1 potential_profile
+    reward_mode: jnp.ndarray  # 0 baseline, 1 potential, 2 profile, 3 success, 4 margin, 5 vertical
     reward_gamma: jnp.ndarray
     reward_potential_scale: jnp.ndarray
+    sensor_noise_scale: jnp.ndarray  # 1 normally; 0 for labeled diagnostic only
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +184,7 @@ class LanderEnv:
             reward_potential_scale=jnp.float32(
                 vehicle_params.get("reward_potential_scale", 20.0)
             ),
+            sensor_noise_scale=jnp.float32(vehicle_params.get("sensor_noise_scale", 1.0)),
         )
 
         obs = _make_obs(state, k_noise)
@@ -291,6 +297,33 @@ class LanderEnv:
             "crash": r_crash,
             "landing": r_land,
         }
+        experimental = landing_profile_reward(
+            state, y_new, vx_new, vy_new, throttle, angle_norm, contacted
+        )
+        reward_components = jax.tree_util.tree_map(
+            lambda original, revised: jnp.where(state.reward_mode == 2.0, revised, original),
+            reward_components, experimental,
+        )
+        success_reward = success_contact_reward(experimental, landed_soft, crashed)
+        reward_components = jax.tree_util.tree_map(
+            lambda original, revised: jnp.where(state.reward_mode == 3.0, revised, original),
+            reward_components, success_reward,
+        )
+        margin_reward = success_contact_reward(
+            landing_profile_reward(
+                state, y_new, vx_new, vy_new, throttle, angle_norm, contacted, margin=True
+            ),
+            landed_soft, crashed,
+        )
+        reward_components = jax.tree_util.tree_map(
+            lambda original, revised: jnp.where(state.reward_mode == 4.0, revised, original),
+            reward_components, margin_reward,
+        )
+        vertical_reward = vertical_touchdown_reward(margin_reward, vy_new, contacted)
+        reward_components = jax.tree_util.tree_map(
+            lambda original, revised: jnp.where(state.reward_mode == 5.0, revised, original),
+            reward_components, vertical_reward,
+        )
 
         # --- Next state (body/vehicle params carried forward unchanged) ---
         next_state = state._replace(
@@ -342,4 +375,5 @@ def _make_obs(state: EnvState, key: jax.Array) -> jnp.ndarray:
         h_physical=h_physical,
     )
 
-    return obs_noisy
+    return jnp.where(state.sensor_noise_scale == 1.0, obs_noisy,
+                     obs_clean + state.sensor_noise_scale * (obs_noisy - obs_clean))

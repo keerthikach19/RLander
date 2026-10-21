@@ -217,3 +217,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated experiments and local release packages (app/release_data is committed).
+outputs/
+ckpts/
+data/
+.pytest_tmp/
