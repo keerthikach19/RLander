@@ -182,10 +182,15 @@ Atmosphere: `rho(h) = rho0 * exp(-h / scale_height_m)`; drag `0.5 * rho * |v|^2 
 class LanderEnv:  # pure JAX, gymnax-style functional API
     observation_space: (8,)  # see 5.4
     action_space: (2,)       # [throttle in [-1,1] -> mapped to [min_throttle, 1], thrust_angle in [-1,1]]
-    def reset(key, body_params, vehicle_params) -> obs, state
-    def step(state, action, key) -> obs, reward_components(dict), done, info
-    # state: x, y, vx, vy, vx_prev, vy_prev, mass, t, rng
-    # info (clean ground truth, eval only): touchdown_v, touchdown_vx, fuel_used, crashed, landed, truncated, outcome
+    reset(key, body_params, vehicle_params) -> obs, state
+    step(state, action, key) -> obs, next_state, reward_components, done, info
+    # Three clarifications go with it:Parameters live in state. state is a pytree holding x, y, vx, vy, vx_prev, vy_prev, mass, t plus body_params and vehicle_params. reset copies them in, and step carries them forward unchanged. That’s how one compiled step can be vmap’d across different bodies, per the compile-once rule.
+    #No rng in state. The caller passes a fresh key to every step, used only for sensor noise. The physics is deterministic given the state. This replaces the old state.rng field, which was redundant.
+    #No auto-reset inside the env. done = terminated | truncated, and W2’s training loop handles resetting finished environments, for example with jnp.where over a fresh reset.
+
+    #Two smaller points:
+
+    #reward = sum(reward_components.values()), and W2 does the summing.info["outcome"] is an integer code, because strings can’t go through jit: 0 running, 1 landed, 2 crashed, 3 timeout. info["truncated"] is a bool. The DB maps the codes to text.
 ```
 Dynamics (planar point mass): angle θ = a_angle · gimbal_limit from vertical; `ax = T sinθ/m − Dx/m`, `ay = T cosθ/m − g − Dy/m`; `ṁ = T/(isp·g0)`; thrust is zero once `mass ≤ dry_mass`. Integrate with RK4 (2–4 substeps per control step).
 
@@ -214,6 +219,52 @@ weights: w_v=1.0, w_h=0.5, w_f=0.1, w_theta=0.05
 ```
 - The reward fn **returns a dict of named components** (sum = reward); the Reward Lab and the LLM loop need per-term stats
 - **Sanity check (W2):** log cumulative shaping over a typical episode; it should be roughly 0.2–1× the terminal bonus. If it dwarfs ±100 the agent can prefer crashing early or hovering: rescale `w_*`
+
+### 5.5.1 Optional descent-profile potential (approved experiment, Oct 16 2026)
+
+Scoped integrator approval permits W2 to edit `env/` and this plan for this
+experiment, with a separate commit and W1 handoff. All other §5.7 ownership
+remains unchanged. The §5.5 reward remains the **default** (`baseline`) and the
+ablation control; this is not a change to success thresholds or physics.
+
+Select `+reward.mode=potential_profile` in `train.py`; optionally set
+`+reward.potential_scale=20` (initial experimental assumption, not a tuned fact).
+Only the named `velocity` component changes, by **adding**:
+
+```
+v_ref(h) = -min(30 m/s, sqrt((0.4 m/s)^2 + g * max(h, 0)))
+Phi(s) = -k * sqrt(vx^2 + (vy - v_ref(h))^2) / U
+F(s, s') = gamma * Phi(s') - Phi(s)
+```
+
+The baseline speed cost stays in that component. `gamma` must equal PPO's
+discount. Contact is absorbing with `Phi=0`; time-limit truncation retains the
+final state's potential, consistent with PPO bootstrapping before caller reset.
+This preserves the underlying discounted objective under the usual potential
+shaping assumptions; it does not guarantee finite-sample PPO convergence.
+Undiscounted reward totals across modes are not an invariant comparison.
+Altitude/fuel/angle costs, terminal ±100, dynamics, noise, and termination are
+unchanged. The nonzero 0.4 m/s reference remains below Europa's fixed threshold.
+
+Optional numeric vehicle parameters carried unchanged in state are
+`reward_mode` (float32: 0 baseline, 1 potential_profile), `reward_gamma`
+(default 0.995), and `reward_potential_scale` (default 20). Omitting them preserves
+baseline behavior. `train.py` maps the string selector to these data fields and
+records them in the manifest; no strings or Python body-name branches enter jit.
+W4 should mirror this approved addendum into `docs/contracts.md` when integrated.
+
+Feasibility: on the uncapped reference, `dv_ref/dt = g/2`; on its capped segment
+it is zero. At maximum randomized Europa gravity this needs 0.671 m/s². Minimum
+randomized thrust, maximum initial mass, and full gimbal tilt still provide
+about 2.106 m/s² of net vertical acceleration. This checks tracking the profile
+with fuel available, not recovery from every possible off-profile state.
+
+Validate on separate seeds (e.g. `+evaluation.seed_start=2000
++evaluation.episodes=100`) in bounded smoke runs. Report soft landings and
+timeouts; the §7 full-run gate still applies. The frozen test set already used
+in debugging must not be represented as a fresh holdout. For Phase B, treat this
+as an explicitly hand-designed baseline candidate alongside §5.5; do not credit
+the profile to Groq or silently include it in an LLM candidate's contribution.
 
 ### 5.6 Success metric (per body, in `bodies.yaml` under `success:`)
 `landed AND |vy| < vy_max AND |vx| < vx_max` (tilt n/a: point mass). Start every body at Europa's values and justify any change in the YAML comments. The metric lives in `eval/metrics.py` and reads only `info`; the reward may know the thresholds, but the metric never reads the reward.

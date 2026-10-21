@@ -1,0 +1,299 @@
+{
+  "title": "RLander \u00b7 Europa",
+  "seeds": [
+    60000,
+    60999
+  ],
+  "success_criteria": "Ground contact with |vy| < 1.0 m/s and |vx| < 0.5 m/s",
+  "selection": {
+    "arm": "margin_seed_5",
+    "additional_steps": 20000,
+    "validation_successes": 339,
+    "validation_episodes": 400,
+    "validation_seeds": [
+      6000,
+      6399
+    ],
+    "checkpoint": "/kaggle/working/europa_ppo_recovery_v4/margin_seed_5/ppo-europa-5-20261020T065159-4b69c0e5/snapshots/20000/checkpoint",
+    "frozen_before_test": true
+  },
+  "source_archive_sha256": "b67c48c5ba30733f7bb5ff05e17749756437402154561e1a6f89d6338499a0b8",
+  "policies": {
+    "ppo": {
+      "n_episodes": 1000,
+      "n_success": 875,
+      "success_rate": 0.875,
+      "ci95_low": 0.8530561617655495,
+      "ci95_high": 0.8940737693689421,
+      "fuel_mean": 48.32601849365234,
+      "touchdown": {
+        "n_episodes": 999,
+        "vy_mean": 0.6951270741116893,
+        "vy_std": 0.33778614893108033,
+        "vx_mean": 0.23597686702373424,
+        "vx_std": 0.15933120081398436
+      },
+      "by_outcome": {
+        "landed": {
+          "n_episodes": 875,
+          "vy_mean": 0.6170307941777365,
+          "vy_std": 0.19593246843792228,
+          "vx_mean": 0.20647369908674487,
+          "vx_std": 0.13809854135715374
+        },
+        "crashed": {
+          "n_episodes": 124,
+          "vy_mean": 1.246209694613372,
+          "vy_std": 0.5491935228557122,
+          "vx_mean": 0.44416454399845773,
+          "vx_std": 0.14305664022429893
+        },
+        "timeout": {
+          "n_episodes": 1,
+          "vy_mean": 0.3567080497741699,
+          "vy_std": 0.0,
+          "vx_mean": 1.160074234008789,
+          "vx_std": 0.0
+        }
+      },
+      "sensor_noise_scale": 1.0,
+      "label": "PPO \u00b7 selected v4",
+      "replays": [
+        {
+          "seed": 60000,
+          "outcome": "landed",
+          "file": "trajectories/ppo/60000.parquet"
+        },
+        {
+          "seed": 60002,
+          "outcome": "landed",
+          "file": "trajectories/ppo/60002.parquet"
+        },
+        {
+          "seed": 60003,
+          "outcome": "landed",
+          "file": "trajectories/ppo/60003.parquet"
+        },
+        {
+          "seed": 60004,
+          "outcome": "landed",
+          "file": "trajectories/ppo/60004.parquet"
+        },
+        {
+          "seed": 60005,
+          "outcome": "landed",
+          "file": "trajectories/ppo/60005.parquet"
+        },
+        {
+          "seed": 60006,
+          "outcome": "landed",
+          "file": "trajectories/ppo/60006.parquet"
+        },
+        {
+          "seed": 60001,
+          "outcome": "crashed",
+          "file": "trajectories/ppo/60001.parquet"
+        },
+        {
+          "seed": 60010,
+          "outcome": "crashed",
+          "file": "trajectories/ppo/60010.parquet"
+        },
+        {
+          "seed": 60022,
+          "outcome": "crashed",
+          "file": "trajectories/ppo/60022.parquet"
+        },
+        {
+          "seed": 60147,
+          "outcome": "timeout",
+          "file": "trajectories/ppo/60147.parquet"
+        }
+      ]
+    },
+    "parent": {
+      "n_episodes": 1000,
+      "n_success": 831,
+      "success_rate": 0.831,
+      "ci95_low": 0.8065163113623401,
+      "ci95_high": 0.8529503745190379,
+      "fuel_mean": 46.31975170898438,
+      "touchdown": {
+        "n_episodes": 1000,
+        "vy_mean": 0.7293772819787264,
+        "vy_std": 0.37383884677001994,
+        "vx_mean": 0.23322618461772798,
+        "vx_std": 0.14743692072802778
+      },
+      "by_outcome": {
+        "landed": {
+          "n_episodes": 831,
+          "vy_mean": 0.6154530864796197,
+          "vy_std": 0.19230784155824657,
+          "vx_mean": 0.19917880605108293,
+          "vx_std": 0.12407907078208799
+        },
+        "crashed": {
+          "n_episodes": 169,
+          "vy_mean": 1.2895607521548074,
+          "vy_std": 0.5171882101600656,
+          "vx_mean": 0.40064258455194135,
+          "vx_std": 0.13854269655744644
+        },
+        "timeout": {
+          "n_episodes": 0,
+          "vy_mean": null,
+          "vy_std": null,
+          "vx_mean": null,
+          "vx_std": null
+        }
+      },
+      "sensor_noise_scale": 1.0,
+      "label": "PPO \u00b7 parent",
+      "replays": [
+        {
+          "seed": 60000,
+          "outcome": "landed",
+          "file": "trajectories/parent/60000.parquet"
+        },
+        {
+          "seed": 60002,
+          "outcome": "landed",
+          "file": "trajectories/parent/60002.parquet"
+        },
+        {
+          "seed": 60003,
+          "outcome": "landed",
+          "file": "trajectories/parent/60003.parquet"
+        },
+        {
+          "seed": 60004,
+          "outcome": "landed",
+          "file": "trajectories/parent/60004.parquet"
+        },
+        {
+          "seed": 60005,
+          "outcome": "landed",
+          "file": "trajectories/parent/60005.parquet"
+        },
+        {
+          "seed": 60006,
+          "outcome": "landed",
+          "file": "trajectories/parent/60006.parquet"
+        },
+        {
+          "seed": 60001,
+          "outcome": "crashed",
+          "file": "trajectories/parent/60001.parquet"
+        },
+        {
+          "seed": 60010,
+          "outcome": "crashed",
+          "file": "trajectories/parent/60010.parquet"
+        },
+        {
+          "seed": 60022,
+          "outcome": "crashed",
+          "file": "trajectories/parent/60022.parquet"
+        },
+        {
+          "seed": 60147,
+          "outcome": "crashed",
+          "file": "trajectories/parent/60147.parquet"
+        }
+      ]
+    },
+    "pd": {
+      "n_episodes": 1000,
+      "n_success": 986,
+      "success_rate": 0.986,
+      "ci95_low": 0.9766379658797332,
+      "ci95_high": 0.9916424248705681,
+      "fuel_mean": 36.96002685546875,
+      "touchdown": {
+        "n_episodes": 1000,
+        "vy_mean": 0.43261161623673977,
+        "vy_std": 0.25231528895963956,
+        "vx_mean": 0.03509644870576915,
+        "vx_std": 0.026099518804552586
+      },
+      "by_outcome": {
+        "landed": {
+          "n_episodes": 986,
+          "vy_mean": 0.4233643743687717,
+          "vy_std": 0.24160881272447743,
+          "vx_mean": 0.03511743388459385,
+          "vx_std": 0.026173958605670445
+        },
+        "crashed": {
+          "n_episodes": 14,
+          "vy_mean": 1.0838816506522042,
+          "vy_std": 0.07698913859433233,
+          "vx_mean": 0.03361849253997207,
+          "vx_std": 0.020122523078610243
+        },
+        "timeout": {
+          "n_episodes": 0,
+          "vy_mean": null,
+          "vy_std": null,
+          "vx_mean": null,
+          "vx_std": null
+        }
+      },
+      "sensor_noise_scale": 1.0,
+      "label": "PD controller",
+      "replays": [
+        {
+          "seed": 60000,
+          "outcome": "landed",
+          "file": "trajectories/pd/60000.parquet"
+        },
+        {
+          "seed": 60002,
+          "outcome": "landed",
+          "file": "trajectories/pd/60002.parquet"
+        },
+        {
+          "seed": 60003,
+          "outcome": "landed",
+          "file": "trajectories/pd/60003.parquet"
+        },
+        {
+          "seed": 60004,
+          "outcome": "landed",
+          "file": "trajectories/pd/60004.parquet"
+        },
+        {
+          "seed": 60005,
+          "outcome": "landed",
+          "file": "trajectories/pd/60005.parquet"
+        },
+        {
+          "seed": 60006,
+          "outcome": "landed",
+          "file": "trajectories/pd/60006.parquet"
+        },
+        {
+          "seed": 60001,
+          "outcome": "landed",
+          "file": "trajectories/pd/60001.parquet"
+        },
+        {
+          "seed": 60010,
+          "outcome": "landed",
+          "file": "trajectories/pd/60010.parquet"
+        },
+        {
+          "seed": 60022,
+          "outcome": "landed",
+          "file": "trajectories/pd/60022.parquet"
+        },
+        {
+          "seed": 60147,
+          "outcome": "landed",
+          "file": "trajectories/pd/60147.parquet"
+        }
+      ]
+    }
+  }
+}

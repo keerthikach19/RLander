@@ -1,0 +1,23 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    env:
+      JAX_PLATFORMS: cpu
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Install dependency manager
+        run: python -m pip install uv==0.13.1
+      - name: Install locked CPU runtime and app
+        run: uv sync --locked --python '3.13'
+      - name: Lint
+        run: uv run --locked --python '3.13' ruff check .
+      - name: Tests
+        run: uv run --locked --python '3.13' python -m pytest -q

@@ -1,0 +1,139 @@
+{
+  "run_id": "ppo-europa-1-20261017T181835-405fdb8e",
+  "policies": {
+    "PPO": [
+      {
+        "seed": 2000,
+        "outcome": "crash",
+        "duration_s": 125.6635971069336,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -1.7733449935913086,
+        "final_vx_mps": 4.783554553985596,
+        "last_20s_altitude_range_m": [
+          0.0,
+          59.674747467041016
+        ],
+        "last_20s_mean_abs_vy_mps": 3.062662363052368
+      },
+      {
+        "seed": 2001,
+        "outcome": "crash",
+        "duration_s": 113.4231948852539,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -2.3081002235412598,
+        "final_vx_mps": 5.887485027313232,
+        "last_20s_altitude_range_m": [
+          0.0,
+          77.36280059814453
+        ],
+        "last_20s_mean_abs_vy_mps": 3.921729564666748
+      },
+      {
+        "seed": 2002,
+        "outcome": "crash",
+        "duration_s": 128.27601623535156,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.8040626049041748,
+        "final_vx_mps": 3.465015411376953,
+        "last_20s_altitude_range_m": [
+          0.0,
+          35.87334442138672
+        ],
+        "last_20s_mean_abs_vy_mps": 1.8178014755249023
+      },
+      {
+        "seed": 2003,
+        "outcome": "crash",
+        "duration_s": 122.45362091064453,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -2.208353281021118,
+        "final_vx_mps": 5.860848903656006,
+        "last_20s_altitude_range_m": [
+          0.0,
+          74.90007019042969
+        ],
+        "last_20s_mean_abs_vy_mps": 3.8409175872802734
+      },
+      {
+        "seed": 2004,
+        "outcome": "timeout",
+        "duration_s": 222.8618927001953,
+        "final_altitude_m": 28.940685272216797,
+        "final_vy_mps": -0.24881768226623535,
+        "final_vx_mps": 1.3554575443267822,
+        "last_20s_altitude_range_m": [
+          28.940685272216797,
+          32.87942886352539
+        ],
+        "last_20s_mean_abs_vy_mps": 0.19967608153820038
+      }
+    ],
+    "PD": [
+      {
+        "seed": 2000,
+        "outcome": "soft landing",
+        "duration_s": 92.34062194824219,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.7925093770027161,
+        "final_vx_mps": -0.04607833921909332,
+        "last_20s_altitude_range_m": [
+          0.0,
+          133.28237915039062
+        ],
+        "last_20s_mean_abs_vy_mps": 6.787693023681641
+      },
+      {
+        "seed": 2001,
+        "outcome": "soft landing",
+        "duration_s": 88.13289642333984,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.5443439483642578,
+        "final_vx_mps": -0.035046402364969254,
+        "last_20s_altitude_range_m": [
+          0.0,
+          135.35211181640625
+        ],
+        "last_20s_mean_abs_vy_mps": 6.7960076332092285
+      },
+      {
+        "seed": 2002,
+        "outcome": "soft landing",
+        "duration_s": 88.45320129394531,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.29228025674819946,
+        "final_vx_mps": 0.07622223347425461,
+        "last_20s_altitude_range_m": [
+          0.0,
+          132.61314392089844
+        ],
+        "last_20s_mean_abs_vy_mps": 6.665699005126953
+      },
+      {
+        "seed": 2003,
+        "outcome": "soft landing",
+        "duration_s": 93.14490509033203,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.3000195026397705,
+        "final_vx_mps": 0.07063542306423187,
+        "last_20s_altitude_range_m": [
+          0.0,
+          137.48980712890625
+        ],
+        "last_20s_mean_abs_vy_mps": 6.989119052886963
+      },
+      {
+        "seed": 2004,
+        "outcome": "soft landing",
+        "duration_s": 92.53031921386719,
+        "final_altitude_m": 0.0,
+        "final_vy_mps": -0.28575652837753296,
+        "final_vx_mps": 0.025815775617957115,
+        "last_20s_altitude_range_m": [
+          0.0,
+          125.5793685913086
+        ],
+        "last_20s_mean_abs_vy_mps": 6.381526470184326
+      }
+    ]
+  }
+}

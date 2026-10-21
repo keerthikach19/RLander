@@ -1,0 +1,46 @@
+# User authorized the PPO-only 2M ablation despite the failed smoke on 2026-10-18.
+# This explicit exception applies only to this no-BC Europa arm, seeds 1--3.
+# Inspect without training:
+# uv run python train.py --config-path rl/configs --config-name kaggle_europa_2m --cfg job
+# On Kaggle, run from the repository with its dependencies/JAX GPU installed.
+body: europa
+vehicle: europa_lander
+seed: 1
+bc_init: null
+smoke_success_rate: null  # No qualifying no-BC smoke result; never claim a pass.
+ppo_only_ablation_waiver: user-approved-2026-10-18-ppo-only-2m
+output_root: /kaggle/working/ckpts/europa_shaped_no_bc_2m
+reward:
+  # PLAN 5.5 baseline weights remain velocity=1, altitude=.5, fuel=.1,
+  # angle=.05, terminal +/-100, with the same six named components.
+  # PLAN 5.5.1 adds gamma*Phi(next)-Phi(now) to velocity only; gamma=.995.
+  # Assumptions: v_ref=-min(30, sqrt(.4^2+g*max(h,0))) m/s, Phi=-k*error/U.
+  # k=100 is experimental (env default is 20), not a new success threshold.
+  # The successful BC run's dense/terminal ratio was ~1.40, ABOVE .2--1 target.
+  # The magnitude target is unmet; weights were deliberately not rescaled.
+  mode: potential_profile  # Maps to env reward_mode=1.
+  potential_scale: 100.0
+evaluation:
+  seed_start: 2000
+  episodes: 100
+ppo:
+  num_envs: 128
+  num_steps: 125
+  total_steps: 2000000  # Exactly 125 updates of 16,000 transitions.
+  num_minibatches: 8
+  update_epochs: 4
+  learning_rate: 0.0003
+  gamma: 0.995
+  gae_lambda: 0.95
+  clip_coef: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  initial_action_mean: [-0.5, 0.0]
+  initial_log_std: -1.0
+  reward_scale: 0.01
+hydra:
+  run:
+    dir: /kaggle/working/hydra/europa_shaped_no_bc_2m/${now:%Y%m%d_%H%M%S}
+  job:
+    chdir: false

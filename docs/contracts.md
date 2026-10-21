@@ -19,10 +19,15 @@ Atmosphere: `rho(h) = rho0 * exp(-h / scale_height_m)`; drag `0.5 * rho * |v|^2 
 class LanderEnv:  # pure JAX, gymnax-style functional API
     observation_space: (8,)  # see 5.4
     action_space: (2,)       # [throttle in [-1,1] -> mapped to [min_throttle, 1], thrust_angle in [-1,1]]
-    def reset(key, body_params, vehicle_params) -> obs, state
-    def step(state, action, key) -> obs, reward_components(dict), done, info
-    # state: x, y, vx, vy, vx_prev, vy_prev, mass, t, rng
-    # info (clean ground truth, eval only): touchdown_v, touchdown_vx, fuel_used, crashed, landed, truncated, outcome
+    reset(key, body_params, vehicle_params) -> obs, state
+    step(state, action, key) -> obs, next_state, reward_components, done, info
+    # Three clarifications go with it:Parameters live in state. state is a pytree holding x, y, vx, vy, vx_prev, vy_prev, mass, t plus body_params and vehicle_params. reset copies them in, and step carries them forward unchanged. That’s how one compiled step can be vmap’d across different bodies, per the compile-once rule.
+    #No rng in state. The caller passes a fresh key to every step, used only for sensor noise. The physics is deterministic given the state. This replaces the old state.rng field, which was redundant.
+    #No auto-reset inside the env. done = terminated | truncated, and W2’s training loop handles resetting finished environments, for example with jnp.where over a fresh reset.
+
+    #Two smaller points:
+
+    #reward = sum(reward_components.values()), and W2 does the summing.info["outcome"] is an integer code, because strings can’t go through jit: 0 running, 1 landed, 2 crashed, 3 timeout. info["truncated"] is a bool. The DB maps the codes to text.
 ```
 Dynamics (planar point mass): angle Î¸ = a_angle Â· gimbal_limit from vertical; `ax = T sinÎ¸/m âˆ’ Dx/m`, `ay = T cosÎ¸/m âˆ’ g âˆ’ Dy/m`; `á¹ = T/(ispÂ·g0)`; thrust is zero once `mass â‰¤ dry_mass`. Integrate with RK4 (2â€“4 substeps per control step).
 

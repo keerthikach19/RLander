@@ -1,0 +1,24 @@
+# RLander body configurations
+# Phase A: Europa only. Phase B adds Mars, Titan, Enceladus.
+#
+# Contract (§5.1): each body defines g, radius_m, rho0, scale_height_m, success.
+# rho0=0.0 for vacuum bodies; scale_height_m>0 ALWAYS (use 1.0 for vacuum).
+# Success thresholds in m/s; start at Europa values per §5.6.
+
+europa:
+  name: europa
+  # Source: NASA JPL Europa Fact Sheet
+  # https://nssdc.gsfc.nasa.gov/planetary/factsheet/europafact.html
+  # Surface gravity: 1.315 m/s^2
+  g: 1.315
+  # Mean radius: 1560.8 km
+  # Source: https://nssdc.gsfc.nasa.gov/planetary/factsheet/europafact.html 
+  radius_m: 1560800.0
+  # Europa has no atmosphere (vacuum body)
+  rho0: 0.0
+  # Dummy scale height for vacuum (must be >0 to avoid NaN under jit)
+  scale_height_m: 1.0
+  success:
+    # §5.6: Start every body at Europa's values
+    vy_max_mps: 1.0
+    vx_max_mps: 0.5

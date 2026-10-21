@@ -1,0 +1,330 @@
+{
+  "release": "V7 frozen PPO-only",
+  "seeds": [
+    90000,
+    91999
+  ],
+  "success_criteria": "Ground contact with |vy| < 1.0 m/s and |vx| < 0.5 m/s",
+  "selection": {
+    "arm": "seed_15",
+    "additional_steps": 80000,
+    "validation_successes": 917,
+    "validation_episodes": 1000,
+    "validation_seeds": [
+      11000,
+      11999
+    ],
+    "frozen_before_test": true,
+    "checkpoint": "/kaggle/working/europa_ppo_recovery_v7/seed_15/ppo-europa-15-20261020T131659-d56d5360/snapshots/80000/checkpoint"
+  },
+  "source_archive_sha256": "6cc4fc973031d2958da71c511b95e647785cf00e8e19a75f3bfd163296dcb775",
+  "evaluation_backend": "All three policies evaluated on Kaggle GPU",
+  "policies": {
+    "ppo": {
+      "n_episodes": 2000,
+      "n_success": 1809,
+      "success_rate": 0.9045,
+      "ci95_low": 0.8908328756284235,
+      "ci95_high": 0.9166162331203164,
+      "fuel_mean": 49.336285369873046,
+      "touchdown": {
+        "n_episodes": 1993,
+        "vy_mean": 0.6609462138323317,
+        "vy_std": 0.2743518712007786,
+        "vx_mean": 0.2080168579249664,
+        "vx_std": 0.14213234713035283
+      },
+      "by_outcome": {
+        "landed": {
+          "n_episodes": 1809,
+          "vy_mean": 0.6113336615083197,
+          "vy_std": 0.18889947644196523,
+          "vx_mean": 0.19026145080777188,
+          "vx_std": 0.12608091715756575
+        },
+        "crashed": {
+          "n_episodes": 184,
+          "vy_mean": 1.1487131005396014,
+          "vy_std": 0.4498255814889284,
+          "vx_mean": 0.3825795289847757,
+          "vx_std": 0.17016691007388243
+        },
+        "timeout": {
+          "n_episodes": 7,
+          "vy_mean": 0.37276513448783327,
+          "vy_std": 0.07703360852803315,
+          "vx_mean": 0.999292824949537,
+          "vx_std": 0.014464576100915174
+        }
+      },
+      "sensor_noise_scale": 1.0,
+      "label": "PPO \u00b7 selected V7",
+      "replays": [
+        {
+          "seed": 90000,
+          "outcome": "landed",
+          "file": "trajectories/ppo/90000.parquet",
+          "sha256": "4dfc23f5e6813a439cde8aa85754db2897a00a24879d6e9e3b84a3e208db63c9"
+        },
+        {
+          "seed": 90001,
+          "outcome": "landed",
+          "file": "trajectories/ppo/90001.parquet",
+          "sha256": "91ef53fcae7f102e514604e38fb658c22f025b860bcf49f311ce66391d4b52f3"
+        },
+        {
+          "seed": 90002,
+          "outcome": "landed",
+          "file": "trajectories/ppo/90002.parquet",
+          "sha256": "3124d1f444592d55f11ee7fd7c2c67fb915f881308ac3187e4774f9e1bacb7fb"
+        },
+        {
+          "seed": 90003,
+          "outcome": "landed",
+          "file": "trajectories/ppo/90003.parquet",
+          "sha256": "7516046beb6a33780e31b18799c4d1671517014d82408a2234d568b0bc0cbaca"
+        },
+        {
+          "seed": 90004,
+          "outcome": "landed",
+          "file": "trajectories/ppo/90004.parquet",
+          "sha256": "26c14cace567aa3e82fb1e34d75d2a62cec812231451dec034a51b9657b978db"
+        },
+        {
+          "seed": 90005,
+          "outcome": "landed",
+          "file": "trajectories/ppo/90005.parquet",
+          "sha256": "b4ab5ac0cd7b01be1595e7c0c1962601a841a1460cc4e40b79b05f7d0a220ffc"
+        },
+        {
+          "seed": 90040,
+          "outcome": "crashed",
+          "file": "trajectories/ppo/90040.parquet",
+          "sha256": "a940b2f4267b9a0bdd0981535c677d7050217aae1335443a032982cadc3bcc99"
+        },
+        {
+          "seed": 90048,
+          "outcome": "crashed",
+          "file": "trajectories/ppo/90048.parquet",
+          "sha256": "31547cc4e615de3fc3f50ea999dcba6a40871017325711fe4a32ee6f323f6526"
+        },
+        {
+          "seed": 90053,
+          "outcome": "crashed",
+          "file": "trajectories/ppo/90053.parquet",
+          "sha256": "f89cfa27920623b996383c06d0b82a27cec0dbbded290d97bd297d6800163360"
+        },
+        {
+          "seed": 90359,
+          "outcome": "timeout",
+          "file": "trajectories/ppo/90359.parquet",
+          "sha256": "ebc36a56d597eb011cd90961e35cacf011ba622b5694e171ab76801de3feb45e"
+        }
+      ]
+    },
+    "parent": {
+      "n_episodes": 2000,
+      "n_success": 1810,
+      "success_rate": 0.905,
+      "ci95_low": 0.8913619885061576,
+      "ci95_high": 0.9170852031953004,
+      "fuel_mean": 49.97520916748047,
+      "touchdown": {
+        "n_episodes": 1996,
+        "vy_mean": 0.6873494352592913,
+        "vy_std": 0.2508239909832424,
+        "vx_mean": 0.1995845700870548,
+        "vx_std": 0.14206515584468488
+      },
+      "by_outcome": {
+        "landed": {
+          "n_episodes": 1810,
+          "vy_mean": 0.6458497567194931,
+          "vy_std": 0.18987464747999325,
+          "vx_mean": 0.1874357459903309,
+          "vx_std": 0.1272933218332763
+        },
+        "crashed": {
+          "n_episodes": 186,
+          "vy_mean": 1.0911903930928117,
+          "vy_std": 0.38006355189510727,
+          "vx_mean": 0.3178069981250672,
+          "vx_std": 0.2085408543733183
+        },
+        "timeout": {
+          "n_episodes": 4,
+          "vy_mean": 0.3496582880616188,
+          "vy_std": 0.039795007061454404,
+          "vx_mean": 1.027862012386322,
+          "vx_std": 0.014584167766447954
+        }
+      },
+      "sensor_noise_scale": 1.0,
+      "label": "PPO \u00b7 V6 parent",
+      "replays": [
+        {
+          "seed": 90000,
+          "outcome": "landed",
+          "file": "trajectories/parent/90000.parquet",
+          "sha256": "6f1e9c2dc175f7541f3f7d4d4887252fcf04bea2627d581e5192fe580c3f226b"
+        },
+        {
+          "seed": 90001,
+          "outcome": "landed",
+          "file": "trajectories/parent/90001.parquet",
+          "sha256": "29bedfabbd20dfc8a11a42dd07a7bec911737451955aa1722e4e74b8c5f4ab61"
+        },
+        {
+          "seed": 90002,
+          "outcome": "landed",
+          "file": "trajectories/parent/90002.parquet",
+          "sha256": "d4eec7de4cba8f01634e8476603d0100f73128b55b38419d16284cd2024c5572"
+        },
+        {
+          "seed": 90003,
+          "outcome": "landed",
+          "file": "trajectories/parent/90003.parquet",
+          "sha256": "fadd101d7acf551cf40a680becc212333f53589769b5dcaa511aecdcc63a94fb"
+        },
+        {
+          "seed": 90004,
+          "outcome": "landed",
+          "file": "trajectories/parent/90004.parquet",
+          "sha256": "ced7d0fc2690dcee3722ad263681565fe87e7c420f3ca6f6ea8f23bc6a4a38f1"
+        },
+        {
+          "seed": 90005,
+          "outcome": "landed",
+          "file": "trajectories/parent/90005.parquet",
+          "sha256": "070e253e80642ba3df20fb682a9923d19f50dbdb5ef06987bcd4a5f5f5f92e32"
+        },
+        {
+          "seed": 90040,
+          "outcome": "crashed",
+          "file": "trajectories/parent/90040.parquet",
+          "sha256": "67da5ee74f7f48c5cd275a07d96fef1cac9f9b99ee44a95c93a1f6c4dd25c3d7"
+        },
+        {
+          "seed": 90048,
+          "outcome": "crashed",
+          "file": "trajectories/parent/90048.parquet",
+          "sha256": "8087a91a99b05402742b28c903ca518add23b66bcf8b76f53cc7533badfed415"
+        },
+        {
+          "seed": 90053,
+          "outcome": "crashed",
+          "file": "trajectories/parent/90053.parquet",
+          "sha256": "109c40512a23ccc4d543f406e4b06d2006f198e0993b19a0d0f87742055fa29d"
+        },
+        {
+          "seed": 90359,
+          "outcome": "timeout",
+          "file": "trajectories/parent/90359.parquet",
+          "sha256": "980078e14435205b70efc8dae6d36b31c68af96740e670922b3da57d2815223a"
+        }
+      ]
+    },
+    "pd": {
+      "n_episodes": 2000,
+      "n_success": 1960,
+      "success_rate": 0.98,
+      "ci95_low": 0.9728813608093478,
+      "ci95_high": 0.9852782737997874,
+      "fuel_mean": 36.9873466796875,
+      "touchdown": {
+        "n_episodes": 2000,
+        "vy_mean": 0.43876748060435056,
+        "vy_std": 0.25960096902514,
+        "vx_mean": 0.03353656416483864,
+        "vx_std": 0.025005948764466795
+      },
+      "by_outcome": {
+        "landed": {
+          "n_episodes": 1960,
+          "vy_mean": 0.425681343545415,
+          "vy_std": 0.24518683169608743,
+          "vx_mean": 0.03345392680522328,
+          "vx_std": 0.025034042112816002
+        },
+        "crashed": {
+          "n_episodes": 40,
+          "vy_mean": 1.0799881964921951,
+          "vy_std": 0.06607198999287671,
+          "vx_mean": 0.03758579478599131,
+          "vx_std": 0.02323107473623692
+        },
+        "timeout": {
+          "n_episodes": 0,
+          "vy_mean": null,
+          "vy_std": null,
+          "vx_mean": null,
+          "vx_std": null
+        }
+      },
+      "sensor_noise_scale": 1.0,
+      "label": "PD baseline",
+      "replays": [
+        {
+          "seed": 90000,
+          "outcome": "landed",
+          "file": "trajectories/pd/90000.parquet",
+          "sha256": "bea84fd79942986a509858ba66eedfe165747183bad10d2c15412c42d3401223"
+        },
+        {
+          "seed": 90001,
+          "outcome": "landed",
+          "file": "trajectories/pd/90001.parquet",
+          "sha256": "6d31864f634ef987a46527c95ec85bddcf537646d3aa7c1fb08c56b2920a03bf"
+        },
+        {
+          "seed": 90002,
+          "outcome": "landed",
+          "file": "trajectories/pd/90002.parquet",
+          "sha256": "59b47c0e2f27885611d12445e8ccfeeb04ecf5a780c4536e5715794ca0d6a7ef"
+        },
+        {
+          "seed": 90003,
+          "outcome": "landed",
+          "file": "trajectories/pd/90003.parquet",
+          "sha256": "17e095807b10f1e857706fd59f4ee0d99c96e965c5e84c2a5463624a194072d7"
+        },
+        {
+          "seed": 90004,
+          "outcome": "landed",
+          "file": "trajectories/pd/90004.parquet",
+          "sha256": "a5e5d9476a662b73642eceaf73c269c869c3a03f35d1e03c009a2eaca7c006d3"
+        },
+        {
+          "seed": 90005,
+          "outcome": "landed",
+          "file": "trajectories/pd/90005.parquet",
+          "sha256": "c7f0499c5029817839a4a163b0c87c143beb576ce1bbfafa96d9c6d57242aee8"
+        },
+        {
+          "seed": 90040,
+          "outcome": "landed",
+          "file": "trajectories/pd/90040.parquet",
+          "sha256": "82124c08efb1aa4234b46c091407931d46f441a0d82cc781ca5e490c3eb21a37"
+        },
+        {
+          "seed": 90048,
+          "outcome": "landed",
+          "file": "trajectories/pd/90048.parquet",
+          "sha256": "449812f9e96851f7786b0417daaee2a2230b911dbf1dcba894d603b63d16df5b"
+        },
+        {
+          "seed": 90053,
+          "outcome": "landed",
+          "file": "trajectories/pd/90053.parquet",
+          "sha256": "59d0ef96b9c0dc60c2859667dbb82b5b21d5e64cce0be717ca752eb982e51e72"
+        },
+        {
+          "seed": 90359,
+          "outcome": "landed",
+          "file": "trajectories/pd/90359.parquet",
+          "sha256": "2fb7059cb54a01f6c14d10fad0f68789e0cadb221f4ee84b00487512ef4ea7ae"
+        }
+      ]
+    }
+  }
+}
