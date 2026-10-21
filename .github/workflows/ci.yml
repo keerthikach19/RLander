@@ -4,22 +4,20 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.11", "3.13"]
+    runs-on: ubuntu-24.04
     env:
       JAX_PLATFORMS: cpu
       PYTHONPATH: .
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
         with:
-          python-version: ${{ matrix.python }}
-      - name: Install CPU runtime and app
-        run: python -m pip install "jax[cpu]" flax optax orbax-checkpoint hydra-core gymnasium pandas pyarrow sqlalchemy pytest ruff streamlit plotly numpy pyyaml
+          python-version: '3.13'
+      - name: Install dependency manager
+        run: python -m pip install uv==0.13.1
+      - name: Install locked CPU runtime and app
+        run: uv sync --locked --python '3.13'
       - name: Lint
-        run: python -m ruff check .
+        run: uv run --locked --python '3.13' ruff check .
       - name: Tests
-        run: python -m pytest -q
+        run: uv run --locked --python '3.13' python -m pytest -q
