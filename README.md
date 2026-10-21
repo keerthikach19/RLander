@@ -1,92 +1,110 @@
 # RLander
 
-A planar, thrust-vectored landing simulator with a learned PPO policy and a
-hand-designed PD controller. The current MVP models Europa, a flat surface,
-fuel consumption, sensor noise, and randomized initial conditions.
+A planar, thrust-vectored landing simulator with a learned PPO (Proximal Policy
+Optimization) controller and a hand-designed PD (proportional–derivative)
+baseline. The Europa MVP includes fuel consumption, sensor noise, randomized
+initial conditions, recorded flight replay, and optional live policy inference.
 
-## Latest result: V7
+## Frozen V7 result
 
-The validation-selected V7 checkpoint (seed15, +80k) achieved **1809/2000
-landings (90.45%)**, versus **1960/2000 (98.00%)** for PD on matching GPU
-test seeds90000–91999. Its gap to PD is **7.55 percentage points**.
-This meets the user's original point-estimate goal of at least90% and within
-eight points of PD. The notebook's stricter91% flag remains false.
+Training is complete. The release uses **seed 15 at +80,000 transitions**,
+selected using **917/1,000 validation landings** before the fresh test.
+The 80,000 transitions are additional experience after a trained parent;
+they are not the total training budget. A transition is one environment step.
+One frozen controller is used for every test flight.
 
-The selected checkpoint had **7/2000 timeouts (0.35%)**. Later checkpoints
-regressed to31/1000 validation timeouts; use the selected80k snapshot, not
-the final640k checkpoint. The parent scored90.50% on the same test, so V7
-does not demonstrate improved success over its parent.
-See [V7 results and timeout diagnosis](docs/PPO_RECOVERY_V7_RESULT.md).
-No additional training has been started.
+| Controller | Landed | Crashed | Timeout | Success | Wilson 95% interval |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Selected V7 PPO | 1,809 | 184 | 7 | **90.45%** | 89.08–91.66% |
+| Parent PPO | 1,810 | 186 | 4 | 90.50% | 89.14–91.71% |
+| PD baseline | 1,960 | 40 | 0 | 98.00% | 97.29–98.53% |
 
-## Previous result: V6
+All three used the same 2,000 test seeds (90000–91999), full-height starts,
+sensor noise, and physical success rules on Kaggle GPU. Success requires
+ground contact with `|vy| < 1.0 m/s` and `|vx| < 0.5 m/s`.
+Timeouts are excluded from touchdown-speed summaries.
 
-The V6 PPO-only curriculum session achieved **1799/2000 landings
-(89.95%)**, versus **1979/2000 (98.95%)** for PD on matching GPU test seeds
-80000–81999. The observed gap is **9.00 percentage points**. This misses the
-target of at least 91% and at most eight points below PD, and is one landing
-short of an observed 90%. The user subsequently authorized one V7 session
-focused on vertical touchdown speed; its notebook is prepared, not executed here.
+The selected PPO controller is **7.55 percentage points below PD**, meeting the
+requested observed-score goal of at least 90% and within eight points of PD.
+The notebook's stricter 91% check remains false. The confidence interval
+describes sampling uncertainty; it does not guarantee a population success
+rate of at least 90%. V7 did not improve success over its parent on this test.
 
-The checkpoint was selected on validation before testing: seed13 at +160k,
-895/1000 validation landings. Its test Wilson 95% interval is **88.55–91.19%**.
-See [V6 result and verification](docs/PPO_RECOVERY_V6_RESULT.md).
+Later checkpoints had more validation timeouts. The release preserves the
+earlier validation-selected checkpoint rather than the final 640,000-step
+snapshot. These runs refine shared parents and are not independent training
+replications. See the [V7 result and timeout diagnosis](docs/PPO_RECOVERY_V7_RESULT.md).
 
-## Packaged V4 replay snapshot
+## Run locally — Python 3.13 only
 
-The existing replay app below still displays the preserved V4 dataset. It has
-not been relabelled with later statistics; the V6/V7 checkpoints and evidence
-are packaged separately.
-
-| Policy | Landings / episodes | Success | Wilson 95% interval |
-| --- | ---: | ---: | ---: |
-| Selected v4 PPO | 875 / 1,000 | 87.5% | 85.3–89.4% |
-| Parent PPO | 831 / 1,000 | 83.1% | 80.7–85.3% |
-| PD controller | 986 / 1,000 | 98.6% | 97.7–99.2% |
-
-All use evaluation seeds 60000–60999 and the same simulator settings. Success
-requires contact with vertical speed below 1.0 m/s and horizontal speed below
-0.5 m/s. PPO ran on Kaggle GPU; PD evaluation ran locally on CPU, so this is
-not a bitwise cross-device equivalence claim.
-
-The selected PPO checkpoint is `margin_seed_5`, at 20,000 additional transitions.
-It was selected using **339/400 validation landings before test evaluation**.
-The test result is for that one policy, not an average over independent training
-seeds: the refinement runs share a trained parent. No PD assistance contributes
-to the PPO score. PPO trails the internal PD baseline by 11.1 percentage points.
-
-## Run the demo
-
-The app replays recorded trajectories and needs no JAX, GPU, or checkpoint:
+From the repository root, with Python 3.13 and `uv` installed:
 
 ```sh
-python -m pip install -r app/requirements.txt
-python -m streamlit run app/Home.py
+uv sync --locked --python 3.13
+uv run --locked --python 3.13 python -m streamlit run app/Home.py
 ```
 
-In this workspace, the dependencies are already installed:
+Open the local URL printed by Streamlit. The dashboard contains:
 
-```powershell
-.\.venv\Scripts\python.exe -m streamlit run app/Home.py
+- **Mission overview:** release results and an example flight.
+- **Flight replay:** recorded flights with trajectory and telemetry controls.
+- **Compare controllers:** PPO, its parent, and PD on matching test seeds.
+- **Training & evidence:** training curves, validation snapshots, and checkpoint registry.
+- **Live simulation:** generates a new episode, then animates it with playback controls.
+
+Recorded replay and evidence use the committed `app/release_data/` files.
+The ten replay seeds include six PPO landings, three crashes, and one timeout;
+all three controllers have recordings for those seeds. These examples are
+illustrative. Aggregate results use all 2,000 episodes per controller.
+
+### Live inference and model files
+
+Actual live PPO inference needs JAX and the separately preserved model at
+`outputs/final_release/selected/`, including `sha256.json`, `manifest.json`, and
+the `checkpoint/` directory. The loader checks the recorded file hashes before
+loading the policy. PD inference uses JAX but does not need a PPO checkpoint.
+
+`outputs/` is ignored by Git: cloning the repository does **not** download the
+model. Keep the local release bundle backed up; distribute it separately if
+others need live PPO inference. On a fresh machine, restore the selected model
+at the path above before selecting PPO.
+
+With only the lightweight dependencies in `app/requirements.txt`, recorded
+replay and evidence are available without JAX. The live page offers a Python
+physics approximation when JAX is unavailable, and also falls back to it when
+actual inference fails. That approximation does not execute the frozen PPO
+network and cannot establish its measured landing success. Check the page's
+execution messages to see which mode ran.
+
+## Checks
+
+```sh
+uv run --locked --python 3.13 ruff check .
+uv run --locked --python 3.13 python -m pytest -q
 ```
 
-Choose a policy and episode to replay its flight and inspect altitude,
-velocity, throttle, and propellant consumption. The comparison table uses
-all 1,000 evaluation episodes. The ten replay seeds deliberately include
-PPO landings, crashes, and its timeout; they are illustrative, not a random
-sample. Every policy has replays for those same seeds.
+GitHub Actions runs these checks on Python 3.13 with the locked dependencies
+and CPU JAX. GPU training and the reported test evaluation were performed on
+Kaggle; ordinary CI does not repeat them. The actual-checkpoint integration
+test skips when the separately distributed model is absent.
 
-## Scope and evidence
+## Evidence and release scope
 
-- The 87.5% demo snapshot is preserved. V6's separately packaged policy reached
-  89.95%. V7's selected checkpoint reached90.45% with a7.55-point gap to PD
-  on its fresh test; its report and checkpoint are packaged separately.
-- [Evaluation summary](app/demo_data/summary.json) contains metrics and provenance.
-- [Release notes](docs/EUROPA_RELEASE.md) explain selection, validation, and remaining release work.
-- Training and evaluations are stored as checkpoints, SQLite metadata, and Parquet trajectories.
-- The simulator is a planar point-mass model, not a full attitude model, terrain
-  avoidance system, or flight-qualified controller. No external benchmark parity is claimed.
+- [Release notes](docs/EUROPA_RELEASE.md): packaged artifacts, verification, and release steps.
+- [Release summary](app/release_data/summary.json): metrics, selection, and replay hashes.
+- [Checkpoint registry](app/release_data/checkpoint_registry.json): validation-selected run winners.
+- [V7 analysis](docs/PPO_RECOVERY_V7_RESULT.md): test counts and timeout diagnosis.
 
-The local demo is ready for review. A public deployment and CI verification
-on the integrated repository remain outstanding. Multi-body support and LLM
-reward generation are later work, outside this MVP.
+The current dashboard reads V7 data from `app/release_data/`. The older V4
+snapshot in `app/demo_data/` is retained as historical evidence.
+Checkpoint files and full experiment archives are stored separately from Git.
+
+The model is a planar point mass over a flat surface. Full attitude dynamics,
+terrain avoidance, flight qualification, and external simulator benchmark
+parity have not been established. The measured PPO–PD gap does not establish
+better generalization outside the tested conditions.
+
+The remaining release steps are passing GitHub checks, merging into `main`,
+and verifying the app from the merged revision. Public hosting is a separate
+step; no deployed URL is recorded here. Further training is not required for
+this MVP release.
