@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from app.ui import evidence_notes, flight_figure, headline, intro, summary, trajectory
+from app.ui import evidence_notes, flight_figure, headline, summary, trajectory
 
 # ── Hero ──────────────────────────────────────────────────────────────────────
 st.caption("FROZEN EVALUATION · EUROPA")

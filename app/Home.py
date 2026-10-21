@@ -1,6 +1,5 @@
 """Replay dashboard; JAX is only imported by opt-in local simulation."""
 
-import os
 from pathlib import Path
 import sys
 
@@ -9,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import streamlit as st
+import streamlit as st  # noqa: E402
 
 st.set_page_config(
     page_title="RLander · Europa",

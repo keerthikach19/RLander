@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from app.ui import COLORS, flight_figure, intro, summary, telemetry_figure, trajectory
+from app.ui import COLORS, flight_figure, summary, telemetry_figure, trajectory
 
 st.caption("RECORDED EVALUATION FLIGHTS")
 st.title("Flight replay")
@@ -56,7 +56,7 @@ outcome_emojis = {"landed": "✅", "crashed": "💥", "timeout": "⏱️"}
 outcome_msgs = {
     "landed": f"Safe landing — |vy| = {abs(final.vy):.3f} m/s, |vx| = {abs(final.vx):.3f} m/s (both within limits).",
     "crashed": f"Crash — contact speed |vy| = {abs(final.vy):.3f} m/s exceeded the 1.0 m/s limit.",
-    "timeout": f"Timeout — episode exceeded the time budget without making contact.",
+    "timeout": "Timeout — episode exceeded the time budget without making contact.",
 }
 oc = ep_info["outcome"]
 if oc == "landed":

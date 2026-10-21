@@ -9,7 +9,6 @@ terrain stays in view as the lander descends.
 
 from __future__ import annotations
 import math
-import os
 import sys
 import time
 from pathlib import Path
@@ -24,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.ui import style
+from app.ui import style  # noqa: E402
 
 VY_SAFE = 1.0
 VX_SAFE = 0.5
@@ -246,7 +245,8 @@ def _frame_chart(frame: pd.DataFrame, fidx: int, outcome: str) -> go.Figure:
     x_trail = xs_all[: fidx + 1]
     y_trail = [max(float(y), 0.0) for y in ys_all[: fidx + 1]]
 
-    x_min = float(xs_all.min()); x_max = float(xs_all.max())
+    x_min = float(xs_all.min())
+    x_max = float(xs_all.max())
     y_max = float(ys_all.max())
     x_pad = max((x_max - x_min) * 0.15, 50)
 
@@ -385,28 +385,28 @@ chart_slot.plotly_chart(_frame_chart(frame, fidx, outcome),
 # -- Live altitude phase explanation / outcome banner ------------------------
 if is_done:
     if outcome == "landed":
-        vok  = abs(final.vy) <= VY_SAFE
+        vok = abs(final.vy) <= VY_SAFE
         vxok = abs(final.vx) <= VX_SAFE
+        vy_mark = "≤ 1.0 ✓" if vok else "> 1.0 ✗"
+        vx_mark = "≤ 0.5 ✓" if vxok else "> 0.5 ✗"
         st.success(
-            f"\u2705 **Soft landing!** \u2014 "
-            f"touchdown |vy| = **{abs(final.vy):.3f} m/s** "
-            f"({'\u2264 1.0 \u2713' if vok else '> 1.0 \u2717'}), "
-            f"|vx| = **{abs(final.vx):.3f} m/s** "
-            f"({'\u2264 0.5 \u2713' if vxok else '> 0.5 \u2717'}). "
-            f"Duration {final.t:.1f} s \u00b7 "
+            f"✅ **Soft landing!** — "
+            f"touchdown |vy| = **{abs(final.vy):.3f} m/s** ({vy_mark}), "
+            f"|vx| = **{abs(final.vx):.3f} m/s** ({vx_mark}). "
+            f"Duration {final.t:.1f} s · "
             f"fuel burned {float(frame.mass.iloc[0]-final.mass):.1f} kg."
         )
     elif outcome == "crashed":
+        vy_mark = "✓" if abs(final.vy) <= VY_SAFE else "✗ EXCEEDED"
+        vx_mark = "✓" if abs(final.vx) <= VX_SAFE else "✗ EXCEEDED"
         st.error(
-            f"\U0001f4a5 **Crash** \u2014 "
-            f"contact |vy| = **{abs(final.vy):.3f} m/s** "
-            f"(limit 1.0 {'\u2713' if abs(final.vy)<=VY_SAFE else '\u2717 EXCEEDED'}), "
-            f"|vx| = **{abs(final.vx):.3f} m/s** "
-            f"(limit 0.5 {'\u2713' if abs(final.vx)<=VX_SAFE else '\u2717 EXCEEDED'})."
+            f"💥 **Crash** — "
+            f"contact |vy| = **{abs(final.vy):.3f} m/s** (limit 1.0 {vy_mark}), "
+            f"|vx| = **{abs(final.vx):.3f} m/s** (limit 0.5 {vx_mark})."
         )
     else:
         st.warning(
-            f"\u23f1\ufe0f **Timeout** \u2014 episode budget exhausted. "
+            f"⏱️ **Timeout** — episode budget exhausted. "
             f"Final altitude {final.y:.1f} m."
         )
 elif ry > 800:

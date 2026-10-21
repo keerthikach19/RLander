@@ -11,6 +11,7 @@ jobs:
         python: ["3.11", "3.13"]
     env:
       JAX_PLATFORMS: cpu
+      PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
