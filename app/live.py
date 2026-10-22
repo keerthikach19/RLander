@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 from functools import lru_cache
 from pathlib import Path
 
@@ -31,7 +32,21 @@ def load_controller(controller):
     return policy, body, vehicle
 
 
-def simulate(controller, seed):
+def validate_initial_conditions(initial_conditions):
+    """Validate physical coordinates/speeds before loading or compiling a model."""
+    if initial_conditions is None:
+        return None
+    if set(initial_conditions) != {"x", "y", "vx", "vy"}:
+        raise ValueError("Starting conditions must contain x, y, vx and vy")
+    values = {name: float(initial_conditions[name]) for name in ("x", "y", "vx", "vy")}
+    if not all(math.isfinite(value) and abs(value) <= 1e6 for value in values.values()):
+        raise ValueError("Starting coordinates and speeds must be finite and within ±1,000,000")
+    if values["y"] <= 0:
+        raise ValueError("Starting altitude must be above the surface")
+    return values
+
+
+def simulate(controller, seed, *, initial_conditions=None):
     import pandas as pd
 
     from eval.batched import collect
@@ -39,14 +54,21 @@ def simulate(controller, seed):
 
     if not 0 <= seed <= 2**32 - 1:
         raise ValueError("Seed must fit an unsigned 32-bit integer")
+    requested = validate_initial_conditions(initial_conditions)
     policy, body, vehicle = load_controller(controller)
-    batch, execution = collect(policy, [seed], body, vehicle)
+    batch, execution = collect(
+        policy, [seed], body, vehicle,
+        initial_conditions=tuple(requested.values()) if requested is not None else None,
+    )
     records, _, info = batch[0]
     metadata = {
         "controller": controller, "seed": seed, "outcome": outcome_name(int(info["outcome"])),
         "backend": execution["backend"], "device": execution["device"],
         "dry_mass_kg": float(vehicle["dry_mass_kg"]),
         "app_root": str(ROOT),
+        "start_mode": "custom" if requested is not None else "randomized",
+        "requested_initial_conditions": requested,
+        "initial_state": {name: float(value) for name, value in pd.DataFrame(records).iloc[0].items()},
         "final_state": {name: float(value) for name, value in pd.DataFrame(records).iloc[-1].items()},
     }
     if controller == "ppo":

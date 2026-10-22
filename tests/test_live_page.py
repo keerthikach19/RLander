@@ -84,3 +84,29 @@ def test_result_only_appears_at_terminal_frame_and_no_end_button(monkeypatch):
     app.session_state["live_fidx"] = 1
     app.run()
     assert any("Crash" in error.value for error in app.error)
+
+
+def test_custom_inputs_reach_actual_inference_and_cannot_silently_fall_back(monkeypatch):
+    requested = []
+
+    def fail(controller, seed, *, initial_conditions):
+        requested.append((controller, seed, initial_conditions))
+        raise RuntimeError("custom model unavailable")
+
+    def forbidden(*args):
+        raise AssertionError("Approximation cannot replace a custom flight")
+
+    monkeypatch.setattr(live, "simulate", fail)
+    monkeypatch.setattr(sim_canvas, "init_state", forbidden)
+    app = live_page()
+    app.radio[0].set_value("Custom start").run()
+    app.number_input(key="start_x").set_value(137.)
+    app.number_input(key="start_y").set_value(1900.)
+    app.number_input(key="start_vx").set_value(-1.25)
+    app.number_input(key="start_vy").set_value(-17.5)
+    app.checkbox[0].check().run()
+    run_button(app).click().run()
+    assert not app.exception
+    assert requested == [("ppo", 42, {"x": 137., "y": 1900., "vx": -1.25, "vy": -17.5})]
+    assert any("custom model unavailable" in error.value for error in app.error)
+    assert "live_traj" not in app.session_state

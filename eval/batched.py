@@ -6,17 +6,25 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from env.lander_env import LanderEnv
+from env.lander_env import LanderEnv, _make_obs
 from rl.execution import event, execute
 
 
 @lru_cache(maxsize=16)
-def make_rollout(policy, max_steps):
+def make_rollout(policy, max_steps, custom_start=False):
     """Policy weights are data arguments, so checkpoint changes reuse compilation."""
-    def rollout(seeds, body, vehicle, weights):
+    def rollout(seeds, body, vehicle, weights, initial_conditions):
         def episode(seed):
             reset_key, sim_key = jax.random.split(jax.random.key(seed))
             obs, state = LanderEnv.reset(reset_key, body, vehicle)
+            if custom_start:
+                x, y, vx, vy = initial_conditions
+                # Keep the training reset's units, vehicle, fuel and time budget.
+                # Changing L to the chosen altitude would change what the saved
+                # network's inputs mean. Initial acceleration is zero, as at reset.
+                state = state._replace(x=x, y=y, vx=vx, vy=vy, vx_prev=vx, vy_prev=vy)
+                noise_key = jax.random.split(reset_key, 8)[-1]
+                obs = _make_obs(state, noise_key)
             shapes = jax.eval_shape(LanderEnv.step, state, jnp.zeros(2), sim_key)
             zero = lambda s: jnp.zeros(s.shape, s.dtype)
             totals, info = jax.tree_util.tree_map(zero, (shapes[2], shapes[4]))
@@ -48,7 +56,7 @@ def make_rollout(policy, max_steps):
     return jax.jit(rollout)
 
 
-def collect(policy_fn, seeds, body, vehicle, max_steps=1024):
+def collect(policy_fn, seeds, body, vehicle, max_steps=1024, *, initial_conditions=None):
     """One compiled batch; transfer once, then serialize trajectories on the CPU."""
     numeric = lambda config: jax.tree_util.tree_map(
         lambda x: jnp.asarray(x, dtype=jnp.float32),
@@ -59,8 +67,10 @@ def collect(policy_fn, seeds, body, vehicle, max_steps=1024):
         policy = lambda obs, key, weights: policy_fn(obs, key)
     weights = getattr(policy_fn, "rollout_weights", ())
     result, evidence = execute(
-        make_rollout(policy, max_steps),
-        (jnp.asarray(seeds, dtype=jnp.uint32), numeric(body), numeric(vehicle), weights),
+        make_rollout(policy, max_steps, custom_start=initial_conditions is not None),
+        (jnp.asarray(seeds, dtype=jnp.uint32), numeric(body), numeric(vehicle), weights,
+         jnp.asarray(initial_conditions if initial_conditions is not None else (0., 0., 0., 0.),
+                     dtype=jnp.float32)),
         label="w3_batched_evaluation",
     )
     event("w3_batched_evaluation", "transferring_results_to_host")

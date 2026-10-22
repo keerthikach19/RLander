@@ -40,3 +40,24 @@ def test_frozen_checkpoint_and_local_rollouts():
     first, _ = simulate("ppo", 90000)
     second, _ = simulate("ppo", 90000)
     np.testing.assert_array_equal(first.to_numpy(), second.to_numpy())
+
+
+def test_frozen_ppo_responds_to_entered_starting_conditions():
+    conditions = {"x": 137., "y": 1900., "vx": -1.25, "vy": -17.5}
+    first, evidence = simulate("ppo", 42, initial_conditions=conditions)
+    other, other_evidence = simulate("ppo", 42, initial_conditions={**conditions, "vy": -23.})
+    for name, value in conditions.items():
+        assert first.iloc[0][name] == value
+        assert evidence["initial_state"][name] == value
+    assert evidence["requested_initial_conditions"] == conditions
+    assert evidence["start_mode"] == "custom"
+    assert evidence["model_run_id"] == other_evidence["model_run_id"]
+    assert evidence["checkpoint_manifest_sha256"] == other_evidence["checkpoint_manifest_sha256"]
+    # Same seed and weights, changed physical input: the network recomputes commands.
+    assert not np.allclose(first.iloc[1][["throttle", "angle"]].to_numpy(),
+                           other.iloc[1][["throttle", "angle"]].to_numpy())
+    for frame, result in ((first, evidence), (other, other_evidence)):
+        assert np.isfinite(frame.to_numpy()).all()
+        final = frame.iloc[-1]
+        physical = ("landed" if abs(final.vy) < 1 and abs(final.vx) < .5 else "crashed") if final.y <= 0 else "timeout"
+        assert result["outcome"] == physical

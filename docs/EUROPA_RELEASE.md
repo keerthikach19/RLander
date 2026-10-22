@@ -87,6 +87,17 @@ device, checkpoint path, run identifier, and manifest hash for PPO; this can
 be downloaded as JSON alongside the trajectory CSV. Installing JAX alone
 does not prove that PPO inference succeeded.
 
+Custom starts accept physical x, altitude, vx and vy and recompute the initial
+observation before running the saved controller. They preserve the normal
+reset's units, randomized vehicle settings, fuel and time budget. The seed
+controls those randomized conditions and sensor noise; it is not a trajectory
+lookup. Evidence includes requested inputs and the actual initial state.
+Full-height training resets covered altitude 1800-2200m, vx within ±2m/s and
+vy from -24 to -16m/s. Arbitrary custom starts are exploratory and do not carry
+the published success estimate. The policy does not observe x or target a
+landing pad. Custom flights require actual inference; the optional approximation
+remains available for randomized starts only.
+
 The same controller and seed repeat the same flight on the same backend.
 Recorded PPO crash examples are seeds 90040, 90048, and 90053; seed 90359 timed
 out on GPU. These examples are selected to demonstrate observed failure modes,

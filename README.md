@@ -84,6 +84,19 @@ Re-running the same seed on the same backend repeats the same flight. Change
 the seed to sample another flight. Recorded PPO failures include crash seeds
 90040, 90048, and 90053 and timeout seed 90359; CPU results may differ from GPU.
 
+Select **Custom start** to enter horizontal position, altitude, vx and vy in
+physical units. Negative vy means descent. The saved controller calculates
+actions from the observations of that new flight; no recorded trajectory is
+selected by the seed. The seed still controls sensor noise and randomized
+vehicle/physical conditions. Initial and requested states are included in the
+evidence export. Observation units, fuel and the episode time budget retain
+their usual reset definitions. Inputs outside the full-height reset ranges
+(altitude 1800-2200 m, vx -2 to +2 m/s, vy -24 to -16 m/s) are exploratory;
+the published 90.45% score does not apply to arbitrary starts. Horizontal x
+translates the flight over flat terrain; the policy has no position input or
+specific landing-pad target. Custom starts require actual inference and cannot
+silently become approximation flights.
+
 ## Checks
 
 ```sh
