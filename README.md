@@ -71,10 +71,18 @@ at the path above before selecting PPO.
 
 With only the lightweight dependencies in `app/requirements.txt`, recorded
 replay and evidence are available without JAX. The live page offers a Python
-physics approximation when JAX is unavailable, and also falls back to it when
-actual inference fails. That approximation does not execute the frozen PPO
-network and cannot establish its measured landing success. Check the page's
-execution messages to see which mode ran.
+physics approximation through an explicit opt-in checkbox, disabled by default.
+With that option enabled, it can run if actual inference is unavailable or fails.
+The approximation has a persistent warning and does not execute the frozen PPO
+network. After a flight, execution evidence containing the controller, seed,
+device, and checkpoint identity can be downloaded alongside the trajectory.
+The episode is calculated before animation; its outcome is revealed only at
+the terminal frame. Playback has pause and restart controls. Airborne speed
+indicators are not a landing result. Technical execution details remain in
+the downloadable evidence after the flight.
+Re-running the same seed on the same backend repeats the same flight. Change
+the seed to sample another flight. Recorded PPO failures include crash seeds
+90040, 90048, and 90053 and timeout seed 90359; CPU results may differ from GPU.
 
 ## Checks
 

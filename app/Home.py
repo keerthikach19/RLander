@@ -28,18 +28,5 @@ pages = [
 with st.sidebar:
     st.markdown("## 🚀 RLander")
     st.caption("EUROPA · TERMINAL DESCENT")
-    st.divider()
-    st.markdown("**PPO-only training — complete**")
-    st.caption("Release: V7 · seed 15 · +80k transitions")
-    st.divider()
-    st.caption(
-        "90.45% landing success over 2,000 test flights on Kaggle GPU. "
-        "PD baseline: 98.0%."
-    )
-    st.divider()
-    st.caption(
-        "**Live simulation** runs the guidance policy step-by-step. "
-        "No JAX required — uses built-in physics approximation."
-    )
 
 st.navigation(pages).run()

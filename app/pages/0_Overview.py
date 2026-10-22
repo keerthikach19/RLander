@@ -1,78 +1,26 @@
-"""Mission overview — the 'homepage' for the demo."""
-
+"""Europa mission overview."""
 import streamlit as st
+from app.ui import flight_figure, headline, summary, trajectory
 
-from app.ui import evidence_notes, flight_figure, headline, summary, trajectory
-
-# ── Hero ──────────────────────────────────────────────────────────────────────
-st.caption("FROZEN EVALUATION · EUROPA")
-st.title("A trained controller learns to land")
-st.write(
-    "A **PPO (Proximal Policy Optimisation) neural network** was trained from scratch — "
-    "no handcrafted rules, no demonstrations — and evaluated on **2,000 previously unseen "
-    "flight seeds** running on Kaggle GPU. It achieved **90.45% safe landings**."
-)
-
-# ── Key stats ─────────────────────────────────────────────────────────────────
+st.caption("EUROPA · AUTONOMOUS LANDING")
+st.title("Learning to land")
+st.write("A trained PPO controller guides a lander to Europa's surface using throttle and engine steering.")
 headline()
-st.caption(
-    "PPO Wilson 95% interval: 89.08–91.66%. "
-    "Gap uses the same 2,000 test flights for both controllers."
-)
-
-# ── Live demo flight + narrative ──────────────────────────────────────────────
-st.divider()
+st.caption("Results from 2,000 matched test flights per controller.")
 left, right = st.columns([1.6, 1])
-
 with left:
     seed = summary()["policies"]["ppo"]["replays"][0]["seed"]
-    frame = trajectory("ppo", seed)
-    st.plotly_chart(
-        flight_figure(frame, animate=True, index=0),
-        width="stretch",
-    )
-    st.caption(
-        f"🎬 Click **▶ Play** to watch the PPO agent land — seed {seed}, "
-        "recorded from the frozen checkpoint evaluation. "
-        "Trail colour shows throttle level; flame plume shows active thrust."
-    )
-
+    st.plotly_chart(flight_figure(trajectory("ppo", seed), animate=True, index=0), width="stretch")
+    st.caption("Recorded evaluation flight · press Play to watch.")
 with right:
-    st.subheader("What makes this real ML?")
-    st.markdown("""
-**The PPO agent:**
-- Takes a **noisy 8-dimensional observation** (position, velocity, mass, time)
-- Outputs **continuous throttle + gimbal angle** every ~0.38 s
-- Learned entirely via **reward signals** — no equation of motion was given to it
-- Trained through **~80,000 additional transitions** of experience
-
-**Evidence you can check:**
-- 📉 Training curves show outcome rates improving over time → *Results* page
-- 🔁 The same seeds produce **different decisions** from the PD baseline → *Compare*
-- 💾 Checkpoint hashes are frozen; the model shown is the one that was tested
-- 🖥️ You can watch the policy run **live, step by step** → *Live simulation*
-""")
-    st.divider()
-    st.subheader("Explore")
-    st.page_link("pages/1_Simulator.py", label="Replay a flight (crashed, landed, timeout)", icon="🎬")
-    st.page_link("pages/2_Compare.py", label="Compare PPO vs PD vs parent on same seeds", icon="📊")
-    st.page_link("pages/3_Results.py", label="See training curves & checkpoint history", icon="📋")
-    st.page_link("pages/4_Local.py", label="Watch the policy decide in real time", icon="🖥️")
-
-# ── Why PPO doesn't beat PD ───────────────────────────────────────────────────
-st.divider()
-st.subheader("Why is PPO below the PD baseline?")
-st.markdown("""
-The PD controller is **purpose-built** for this exact environment — it uses the **true equations of motion** 
-as its control law. That's not a real competitor; it's a sanity-check ceiling.
-
-PPO learned to solve the problem **without knowing the equations**. The 7.55 percentage-point gap 
-is the cost of generalisation without a hand-crafted model. In real planetary landing, you don't 
-always have a perfect dynamics model — which is exactly where learned policies like PPO have value.
-
-> **The honest claim:** PPO achieves >90% success on a stochastic, noisy, full-height landing 
-> problem, trained from scratch in a matter of hours on a single Kaggle GPU.
-""")
-
-st.divider()
-evidence_notes()
+    st.subheader("Explore the mission")
+    st.page_link("pages/4_Local.py", label="Run a simulation", icon="🚀")
+    st.page_link("pages/1_Simulator.py", label="Replay test flights", icon="🎬")
+    st.page_link("pages/2_Compare.py", label="Compare controllers", icon="📊")
+    st.page_link("pages/3_Results.py", label="Training and results", icon="📋")
+    st.write("PPO learns through rewards. The PD baseline uses a hand-designed control law.")
+    st.caption("Safe contact: vertical speed below 1.0 m/s and horizontal speed below 0.5 m/s.")
+with st.expander("About the experiment"):
+    st.write("The frozen V7 policy was selected on validation before testing. It achieved 90.45% success, versus 98.00% for PD. Its parent scored 90.50% on the same test.")
+    st.write("This is a planar simulator with sensor noise and randomized starts. The observed results do not establish performance beyond these tested conditions.")
+    st.caption("PPO 95% confidence interval: 89.08–91.66%. See Training & evidence for the full record.")
