@@ -21,7 +21,8 @@ def test_frozen_checkpoint_and_local_rollouts():
     assert np.isfinite(np.asarray(stats.mean)).all()
     assert np.isfinite(np.asarray(stats.var)).all()
     assert params
-    for controller, seed in (("ppo", 90000), ("ppo", 90359), ("pd", 90000)):
+    observed = {}
+    for controller, seed in (("ppo", 90000), ("ppo", 90040), ("ppo", 90359), ("pd", 90000)):
         frame, result = simulate(controller, seed)
         assert np.isfinite(frame.to_numpy()).all()
         assert (frame.t.diff().iloc[1:] > 0).all()
@@ -29,6 +30,13 @@ def test_frozen_checkpoint_and_local_rollouts():
         final = frame.iloc[-1]
         physical = ("landed" if abs(final.vy) < 1 and abs(final.vx) < .5 else "crashed") if final.y <= 0 else "timeout"
         assert result["outcome"] == physical
+        observed[controller, seed] = result["outcome"]
+        assert result["dry_mass_kg"] == 320
+        if controller == "ppo":
+            assert result["model_run_id"] == "ppo-europa-15-20261020T131659-d56d5360-at-80000"
+            assert len(result["checkpoint_manifest_sha256"]) == 64
+    assert observed["ppo", 90040] == "crashed"
+    assert observed["ppo", 90359] == "timeout"
     first, _ = simulate("ppo", 90000)
     second, _ = simulate("ppo", 90000)
     np.testing.assert_array_equal(first.to_numpy(), second.to_numpy())

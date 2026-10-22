@@ -6,18 +6,7 @@ from app.ui import COLORS, flight_figure, summary, telemetry_figure, trajectory
 
 st.caption("RECORDED EVALUATION FLIGHTS")
 st.title("Flight replay")
-st.write(
-    "These flights were **recorded during the frozen evaluation** on Kaggle GPU — "
-    "they are exact replays of what the policy did during the official test. "
-    "Unlike the *Live simulation* page, nothing is re-computed here; you are watching saved data."
-)
-
-st.info(
-    "💡 **How this differs from Live simulation:** "
-    "This page plays back *saved trajectory data* from the 2,000-flight test. "
-    "The **Live simulation** page actually runs the guidance policy step-by-step in this process.",
-    icon="🎬",
-)
+st.caption("Recorded flights from the frozen evaluation. Choose a controller and episode.")
 
 policies = summary()["policies"]
 controls = st.columns([1, 1, 2])
@@ -55,7 +44,7 @@ is_contact = ep_info["outcome"] != "timeout"
 outcome_emojis = {"landed": "✅", "crashed": "💥", "timeout": "⏱️"}
 outcome_msgs = {
     "landed": f"Safe landing — |vy| = {abs(final.vy):.3f} m/s, |vx| = {abs(final.vx):.3f} m/s (both within limits).",
-    "crashed": f"Crash — contact speed |vy| = {abs(final.vy):.3f} m/s exceeded the 1.0 m/s limit.",
+    "crashed": f"Crash — contact |vy| = {abs(final.vy):.3f} m/s; |vx| = {abs(final.vx):.3f} m/s.",
     "timeout": "Timeout — episode exceeded the time budget without making contact.",
 }
 oc = ep_info["outcome"]
@@ -84,42 +73,6 @@ st.caption(
 st.subheader("Flight path")
 st.caption("Click ▶ Play to watch the descent. Trail colour = throttle level. Flame plume shows active thrust.")
 st.plotly_chart(flight_figure(frame, COLORS[policy_key]), width="stretch")
-
-# ── Policy explanation below the chart ───────────────────────────────────
-with st.expander("🧠 What was the controller doing?", expanded=False):
-    n_firing = int((frame.throttle > 0.05).sum()) if "throttle" in frame.columns else "?"
-    n_coast = len(frame) - n_firing if isinstance(n_firing, int) else "?"
-    max_thr = float(frame.throttle.max()) if "throttle" in frame.columns else 0
-    mean_thr_firing = float(frame.throttle[frame.throttle > 0.05].mean()) if "throttle" in frame.columns and (frame.throttle > 0.05).any() else 0
-    fuel = frame.mass.iloc[0] - final.mass
-
-    if policy_key == "ppo":
-        st.markdown(f"""
-**PPO neural network decisions:**
-- Fired engine in **{n_firing}/{len(frame)} steps** ({n_firing/len(frame):.0%} of the flight)
-- Coasted (throttle ≈ 0) for **{n_coast} steps** — conserving fuel early
-- Peak throttle: **{max_thr:.0%}**, mean when firing: **{mean_thr_firing:.0%}**
-- Total fuel burned: **{fuel:.1f} kg** out of 700 kg propellant
-- The gimbal angle (`angle` column) shows how it corrected horizontal drift
-
-The PPO policy received **no equation of motion** — it learned this deceleration profile 
-purely from reward signals over thousands of training episodes.
-""")
-    elif policy_key == "pd":
-        st.markdown(f"""
-**PD (hand-coded) baseline decisions:**
-- This controller uses the **known equations of motion** directly
-- It fires in **{n_firing}/{len(frame)} steps** and burns **{fuel:.1f} kg** fuel
-- Lower fuel use vs PPO ({fuel:.1f} vs ~49 kg mean) because PD can compute the optimal burn exactly
-- PD is not a learned policy — it is a deterministic control law written by hand
-""")
-    else:
-        st.markdown(f"""
-**PPO parent checkpoint:**
-- This is the **V6 checkpoint** that V7 was refined from
-- {n_firing}/{len(frame)} steps firing, {fuel:.1f} kg fuel burned
-- Nearly identical behaviour to V7 — the refinement showed no clear improvement
-""")
 
 # ── Telemetry ──────────────────────────────────────────────────────────────
 st.subheader("Telemetry")

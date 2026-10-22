@@ -42,7 +42,19 @@ def simulate(controller, seed):
     policy, body, vehicle = load_controller(controller)
     batch, execution = collect(policy, [seed], body, vehicle)
     records, _, info = batch[0]
-    return pd.DataFrame(records), {
+    metadata = {
         "controller": controller, "seed": seed, "outcome": outcome_name(int(info["outcome"])),
         "backend": execution["backend"], "device": execution["device"],
+        "dry_mass_kg": float(vehicle["dry_mass_kg"]),
+        "app_root": str(ROOT),
+        "final_state": {name: float(value) for name, value in pd.DataFrame(records).iloc[-1].items()},
     }
+    if controller == "ppo":
+        selected = ROOT / "outputs/final_release/selected"
+        manifest_bytes = (selected / "manifest.json").read_bytes()
+        metadata.update(
+            checkpoint=str(selected / "checkpoint"),
+            model_run_id=json.loads(manifest_bytes)["run"]["id"],
+            checkpoint_manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+        )
+    return pd.DataFrame(records), metadata

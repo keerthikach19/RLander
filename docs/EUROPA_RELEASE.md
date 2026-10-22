@@ -78,12 +78,19 @@ observation-normalization statistics. Live PD does not require PPO model files.
 
 Live inference uses the JAX environment through `app/live.py`. Its local CPU
 results need not be bitwise identical to the recorded GPU test results.
-The live page offers a separate Python physics approximation when JAX is
-unavailable and falls back to that mode if inference fails. The approximation
-does not execute the PPO checkpoint; its outcomes must not be reported as
-fresh evaluations of the frozen policy. Installing JAX alone does not prove
-that PPO inference succeeded: the checkpoint and successful execution are
-also required.
+The live page keeps a separate Python physics approximation behind an opt-in
+checkbox that defaults to off. Only enabling that option permits fallback
+when actual inference is unavailable or fails. Approximation playback retains
+a visible warning. Its outcomes are not evaluations of the frozen PPO policy.
+Actual flights provide downloadable execution evidence with the controller, seed, backend,
+device, checkpoint path, run identifier, and manifest hash for PPO; this can
+be downloaded as JSON alongside the trajectory CSV. Installing JAX alone
+does not prove that PPO inference succeeded.
+
+The same controller and seed repeat the same flight on the same backend.
+Recorded PPO crash examples are seeds 90040, 90048, and 90053; seed 90359 timed
+out on GPU. These examples are selected to demonstrate observed failure modes,
+not to estimate success from a small hand-picked sample. CPU outcomes may differ.
 
 `scripts/freeze_release.py` created the local package from returned archives
 and their original source manifests. It checks selection and trajectory
@@ -102,6 +109,16 @@ After narrowing project support to Python 3.13 only, the five notebook
 packaging checks passed again. Ruff, lockfile validation, and Git whitespace
 checks passed. Dependency versions used by the tested Python 3.13 environment
 were preserved.
+
+The live-inference follow-up passed four focused tests: the real frozen model
+reproduced a crash on seed 90040 and a timeout on seed 90359 locally, missing
+inference stopped without fallback by default, and explicitly enabled
+approximation retained its visible identity, and the UI labelled a computed
+crash only at the terminal playback frame. The End button and forward scrubber
+have been removed, and execution details are available in post-flight exports.
+The actual running browser UI also reproduced seed 90040's crash at a vertical
+contact speed of 1.029 m/s. The model integration test also
+checked restored normalization statistics and repeated-seed determinism.
 
 CI uses Python 3.13 on Ubuntu 24.04 with dependencies installed from `uv.lock`.
 The pytest temporary directory now works in a fresh checkout. Updated checkout

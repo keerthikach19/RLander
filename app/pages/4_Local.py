@@ -1,14 +1,8 @@
-"""
-Live Simulation — genuine frame-by-frame rendering using st.rerun().
-
-No Plotly animation frames — the chart is rebuilt fresh each step showing
-only the path flown so far.  This is why it looks real: there is no ghost
-trail, the rocket marker rotates with the actual gimbal angle, and the
-terrain stays in view as the lander descends.
-"""
+"""Generate an actual controller rollout or opted-in approximation, then animate it."""
 
 from __future__ import annotations
 import math
+import json
 import sys
 import time
 from pathlib import Path
@@ -39,17 +33,17 @@ def _jax_available() -> bool:
 HAS_JAX = _jax_available()
 
 # ── Page header ───────────────────────────────────────────────────────────────
-st.caption("LIVE INFERENCE · REAL PHYSICS")
-st.title("Live model simulation")
-
-if HAS_JAX:
-    st.success("🧠 **Real model** — JAX available. Runs the actual frozen PPO/PD checkpoint.", icon="✅")
-else:
-    st.info(
-        "🔬 **Physics mode** — JAX not found. "
-        "Run via `uv run python -m streamlit run app/Home.py` for the real model.",
-        icon="ℹ️",
+st.caption("EUROPA")
+st.title("Live simulation")
+st.caption("Generate a flight with the selected controller and watch its trajectory.")
+with st.expander("Simulation options"):
+    allow_approx = st.checkbox(
+        "Allow physics approximation if actual inference is unavailable",
+        value=False,
+        help="Optional hand-coded fallback. It does not run the trained PPO network.",
     )
+if not HAS_JAX:
+    st.warning("The model runtime is unavailable. Install the project dependencies to run the trained controller.")
 
 # ── Anti-flicker style injection ──────────────────────────────────────────────
 st.markdown(
@@ -84,11 +78,10 @@ c1, c2, c3, c4 = st.columns([1.2, 0.8, 0.8, 1.2])
 with c1:
     controller = st.selectbox(
         "Controller",
-        ["ppo", "pd"] if HAS_JAX else ["physics-approx"],
+        ["ppo", "pd"],
         format_func=lambda k: {
             "ppo": "🧠 PPO — frozen V7 neural network",
             "pd": "🔧 PD — hand-coded baseline",
-            "physics-approx": "🔬 Physics approximation",
         }[k],
     )
 with c2:
@@ -104,7 +97,8 @@ with c3:
 with c4:
     st.write("")
     st.write("")
-    run_btn = st.button("🚀  Run Simulation", type="primary", use_container_width=True)
+    run_btn = st.button("🚀  Run Simulation", type="primary", use_container_width=True,
+                        disabled=not HAS_JAX and not allow_approx)
 
 # ── Session-state keys ────────────────────────────────────────────────────────
 SIM_KEY  = "live_traj"
@@ -120,7 +114,7 @@ if run_btn:
 
     success = False
     if HAS_JAX and controller in ("ppo", "pd"):
-        with st.spinner(f"Running {controller.upper()} checkpoint… (first run ~10 s for JAX compile)"):
+        with st.spinner("Preparing flight…"):
             try:
                 from app.live import simulate
                 frame, meta = simulate(controller, int(seed))
@@ -129,9 +123,15 @@ if run_btn:
                 st.session_state[SIM_SRC]  = "real"
                 success = True
             except Exception as exc:
-                st.error(f"Real model failed ({exc}). Falling back to physics approximation.")
+                st.error(f"Actual {controller.upper()} inference failed: {exc}")
+                if not allow_approx:
+                    st.info("Restore the frozen checkpoint for PPO or fix the reported error, then retry.")
+                    st.stop()
 
     if not success:
+        if not allow_approx:
+            st.error("Actual inference is unavailable. No episode was generated.")
+            st.stop()
         with st.spinner("Running physics simulation…"):
             from app.sim_canvas import init_state, step as sim_step
             s = init_state(int(seed))
@@ -147,8 +147,9 @@ if run_btn:
                 "angle":    s.angles + [s.angle],
                 "mass":     s.masses + [s.mass],
             })
-            meta = {"controller": "physics-approx", "seed": int(seed),
-                    "outcome": s.outcome, "backend": "cpu", "device": "python"}
+            meta = {"controller": "physics-approx", "requested_controller": controller,
+                    "seed": int(seed), "outcome": s.outcome, "backend": "cpu",
+                    "device": "python", "dry_mass_kg": 101.13}
             st.session_state[SIM_KEY]  = frame
             st.session_state[SIM_META] = meta
             st.session_state[SIM_SRC]  = "approx"
@@ -168,12 +169,18 @@ meta  = st.session_state[SIM_META]
 src   = st.session_state[SIM_SRC]
 outcome = meta["outcome"]
 N = len(frame)
+final = frame.iloc[-1]
+
+if src == "approx":
+    st.warning("Physics approximation · hand-coded fallback, not the trained PPO model.")
+else:
+    st.caption(f"{meta['controller'].upper()} controller · seed {meta['seed']}")
 
 # ── Playback controls ─────────────────────────────────────────────────────────
 fidx: int = st.session_state.get(FIDX_KEY, 0)
 playing: bool = st.session_state.get(PLAY_KEY, False)
 
-pb1, pb2, pb3, pb4 = st.columns([1, 1, 1, 3])
+pb1, pb2, pb3 = st.columns([1, 1, 4])
 with pb1:
     if st.button("▶  Play" if not playing else "⏸  Pause", use_container_width=True):
         st.session_state[PLAY_KEY] = not playing
@@ -187,27 +194,7 @@ with pb2:
         st.session_state.pop("frame_scrubber", None)
         st.rerun()
 with pb3:
-    if st.button("⏭  End", use_container_width=True):
-        st.session_state[FIDX_KEY] = N - 1
-        st.session_state[PLAY_KEY] = False
-        st.session_state.pop("frame_scrubber", None)
-        st.rerun()
-with pb4:
-    if playing:
-        # During playback: show progress bar — no slider (avoids widget-state conflict)
-        st.progress(fidx / max(N - 1, 1),
-                    text=f"Frame {fidx}/{N-1} · t = {frame.t.iloc[fidx]:.1f} s")
-    else:
-        # Paused: pre-seed slider session state to current frame, then render
-        st.session_state["frame_scrubber"] = fidx
-        new_fidx = st.slider(
-            "Scrub frame", 0, N - 1,
-            label_visibility="collapsed",
-            key="frame_scrubber",
-        )
-        if new_fidx != fidx:
-            st.session_state[FIDX_KEY] = new_fidx
-            fidx = new_fidx
+    st.progress(fidx / max(N - 1, 1), text=f"Flight time · {frame.t.iloc[fidx]:.1f} s")
 
 # ── Current-frame data ────────────────────────────────────────────────────────
 row = frame.iloc[fidx]
@@ -217,7 +204,6 @@ thr  = float(row.throttle) if "throttle" in frame.columns else 0.0
 ang  = float(row.angle)    if "angle"    in frame.columns else 0.0
 
 # ── Live HUD ──────────────────────────────────────────────────────────────────
-final = frame.iloc[-1]
 is_done = (fidx == N - 1)
 
 h1, h2, h3, h4, h5, h6 = st.columns(6)
@@ -226,17 +212,17 @@ h2.metric("Altitude", f"{max(ry, 0.0):.0f} m")
 h3.metric(
     "vy (vertical)",
     f"{row.vy:+.2f} m/s",
-    delta="safe ✓" if abs(row.vy) <= VY_SAFE else "too fast ✗",
-    delta_color="normal" if abs(row.vy) <= VY_SAFE else "inverse",
+    delta="Safe · < 1.0 m/s" if abs(row.vy) < VY_SAFE else "Not safe · ≥ 1.0 m/s",
+    delta_color="normal" if abs(row.vy) < VY_SAFE else "inverse",
 )
 h4.metric(
     "vx (horiz)",
     f"{row.vx:+.2f} m/s",
-    delta="safe ✓" if abs(row.vx) <= VX_SAFE else "too fast ✗",
-    delta_color="normal" if abs(row.vx) <= VX_SAFE else "inverse",
+    delta="Safe · < 0.5 m/s" if abs(row.vx) < VX_SAFE else "Not safe · ≥ 0.5 m/s",
+    delta_color="normal" if abs(row.vx) < VX_SAFE else "inverse",
 )
 h5.metric("Throttle", f"{thr:.0%}")
-h6.metric("Fuel left", f"{max(float(row.mass) - 101.13, 0):.0f} kg")
+h6.metric("Fuel left", f"{max(float(row.mass) - meta['dry_mass_kg'], 0):.0f} kg")
 
 # ── Build the current-frame chart ─────────────────────────────────────────────
 def _frame_chart(frame: pd.DataFrame, fidx: int, outcome: str) -> go.Figure:
@@ -385,10 +371,10 @@ chart_slot.plotly_chart(_frame_chart(frame, fidx, outcome),
 # -- Live altitude phase explanation / outcome banner ------------------------
 if is_done:
     if outcome == "landed":
-        vok = abs(final.vy) <= VY_SAFE
-        vxok = abs(final.vx) <= VX_SAFE
-        vy_mark = "≤ 1.0 ✓" if vok else "> 1.0 ✗"
-        vx_mark = "≤ 0.5 ✓" if vxok else "> 0.5 ✗"
+        vok = abs(final.vy) < VY_SAFE
+        vxok = abs(final.vx) < VX_SAFE
+        vy_mark = "< 1.0 ✓" if vok else "≥ 1.0 ✗"
+        vx_mark = "< 0.5 ✓" if vxok else "≥ 0.5 ✗"
         st.success(
             f"✅ **Soft landing!** — "
             f"touchdown |vy| = **{abs(final.vy):.3f} m/s** ({vy_mark}), "
@@ -397,8 +383,8 @@ if is_done:
             f"fuel burned {float(frame.mass.iloc[0]-final.mass):.1f} kg."
         )
     elif outcome == "crashed":
-        vy_mark = "✓" if abs(final.vy) <= VY_SAFE else "✗ EXCEEDED"
-        vx_mark = "✓" if abs(final.vx) <= VX_SAFE else "✗ EXCEEDED"
+        vy_mark = "✓" if abs(final.vy) < VY_SAFE else "✗ EXCEEDED"
+        vx_mark = "✓" if abs(final.vx) < VX_SAFE else "✗ EXCEEDED"
         st.error(
             f"💥 **Crash** — "
             f"contact |vy| = **{abs(final.vy):.3f} m/s** (limit 1.0 {vy_mark}), "
@@ -409,33 +395,6 @@ if is_done:
             f"⏱️ **Timeout** — episode budget exhausted. "
             f"Final altitude {final.y:.1f} m."
         )
-elif ry > 800:
-    st.info(
-        f"\U0001f311 **High-altitude coast** (t={row.t:.1f} s, h={ry:.0f} m) \u2014 "
-        "Engine off. The policy learned that firing now wastes fuel; "
-        "free-fall is faster and cheaper until the burn window.",
-        icon="\U0001f4a1",
-    )
-elif ry > 150:
-    st.info(
-        f"\U0001f525 **Mid-descent braking** (t={row.t:.1f} s, h={ry:.0f} m) \u2014 "
-        f"Throttle {thr:.0%}. Approaching the retro-burn trigger point. "
-        f"vy = {row.vy:.2f} m/s.",
-        icon="\U0001f525",
-    )
-elif ry > 20:
-    st.warning(
-        f"\U0001f3af **Terminal guidance** (t={row.t:.1f} s, h={ry:.0f} m) \u2014 "
-        f"Throttle {thr:.0%}, gimbal {math.degrees(ang):.1f}\u00b0. "
-        "Suicide-burn window \u2014 the policy must bleed exactly the right speed before contact. "
-        f"vy = {row.vy:.2f} m/s.",
-    )
-else:
-    st.error(
-        f"\U0001f6ec **Final approach** \u2014 {ry:.1f} m above surface. "
-        f"|vy| = {abs(row.vy):.3f} (need < 1.0), |vx| = {abs(row.vx):.3f} (need < 0.5).",
-    )
-
 # -- Live telemetry bar -------------------------------------------------------
 tele_slot = st.empty()
 # Throttle telemetry chart re-renders during playback to reduce DOM churn and flicker
@@ -482,12 +441,13 @@ if playing:
 # ── Post-flight summary (visible when done) ───────────────────────────────────
 if is_done:
     st.divider()
-    with st.expander("🧠 Full flight analysis", expanded=True):
+    with st.expander("Flight details"):
+        st.caption("A complete episode is generated before animation. Playback speed changes only the presentation.")
         firing = int((frame.throttle > 0.05).sum())
         coast  = N - firing
         fuel   = float(frame.mass.iloc[0] - frame.mass.iloc[-1])
-        st.markdown(f"""
-**{meta['controller'].upper()} · seed {seed} · {outcome.upper()}**
+        st.markdown(rf"""
+**{meta['controller'].upper()} · seed {meta['seed']} · {outcome.upper()}**
 
 | Metric | Value |
 |--------|-------|
@@ -499,14 +459,20 @@ if is_done:
 | Final \|vy\| | {abs(final.vy):.3f} m/s (limit 1.0) |
 | Final \|vx\| | {abs(final.vx):.3f} m/s (limit 0.5) |
 
-The long **coast phase** followed by a sharp **retro-burn** is a _suicide burn_ — the
-fuel-optimal landing profile.  PPO discovered this strategy through reward signals alone
-with no knowledge of the equations of motion.
+The telemetry above reports the actions and state changes from this flight.
+It does not establish that the trajectory is fuel-optimal.
 """)
 
-    st.download_button(
-        f"⬇️ Download trajectory CSV — seed {seed}",
-        frame.to_csv(index=False),
-        file_name=f"live_{meta['controller']}_seed{seed}.csv",
-        mime="text/csv",
-    )
+    with st.expander("Export flight"):
+        st.download_button(
+            f"⬇️ Download trajectory CSV — seed {meta['seed']}",
+            frame.to_csv(index=False),
+            file_name=f"live_{meta['controller']}_seed{meta['seed']}.csv",
+            mime="text/csv",
+        )
+        st.download_button(
+            "Download execution evidence JSON",
+            json.dumps(meta, indent=2),
+            file_name=f"live_{meta['controller']}_seed{meta['seed']}_evidence.json",
+            mime="application/json",
+        )
