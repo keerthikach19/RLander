@@ -100,6 +100,33 @@ with c4:
     run_btn = st.button("🚀  Run Simulation", type="primary", use_container_width=True,
                         disabled=not HAS_JAX and not allow_approx)
 
+start_mode = st.radio(
+    "Starting conditions", ["Randomized start", "Custom start"], horizontal=True,
+    help="Both modes calculate a new flight. The seed controls randomized vehicle conditions and sensor noise.",
+)
+initial_conditions = None
+if start_mode == "Custom start":
+    s1, s2, s3, s4 = st.columns(4)
+    initial_conditions = {
+        "x": s1.number_input("Horizontal position x (m)", min_value=-10000.0, max_value=10000.0,
+                             value=0.0, step=10.0, key="start_x"),
+        "y": s2.number_input("Altitude (m)", min_value=1.0, max_value=5000.0,
+                             value=2000.0, step=10.0, key="start_y"),
+        "vx": s3.number_input("Horizontal speed vx (m/s)", min_value=-100.0, max_value=100.0,
+                              value=0.0, step=0.5, key="start_vx"),
+        "vy": s4.number_input("Vertical speed vy (m/s)", min_value=-150.0, max_value=100.0,
+                              value=-20.0, step=0.5, key="start_vy"),
+    }
+    s1.caption("Suggested: 0 m. Horizontal position only shifts the flight.")
+    s2.caption("Training start range: 1,800–2,200 m. Suggested: 2,000 m.")
+    s3.caption("Training start range: −2 to +2 m/s. Suggested: 0 m/s.")
+    s4.caption("Training start range: −24 to −16 m/s. Suggested: −20 m/s (descending).")
+    st.caption("Negative vy means descending. The controller chooses thrust and angle from your starting state. "
+               "Horizontal position moves the flight; this model does not target a specific landing pad.")
+    if not (1800 <= initial_conditions["y"] <= 2200
+            and abs(initial_conditions["vx"]) <= 2 and -24 <= initial_conditions["vy"] <= -16):
+        st.info("This start is outside the full-height training reset ranges. Treat its result as an exploratory flight.")
+
 # ── Session-state keys ────────────────────────────────────────────────────────
 SIM_KEY  = "live_traj"
 SIM_META = "live_meta"
@@ -117,18 +144,24 @@ if run_btn:
         with st.spinner("Preparing flight…"):
             try:
                 from app.live import simulate
-                frame, meta = simulate(controller, int(seed))
+                if initial_conditions is None:
+                    frame, meta = simulate(controller, int(seed))
+                else:
+                    frame, meta = simulate(controller, int(seed), initial_conditions=initial_conditions)
                 st.session_state[SIM_KEY]  = frame
                 st.session_state[SIM_META] = meta
                 st.session_state[SIM_SRC]  = "real"
                 success = True
             except Exception as exc:
                 st.error(f"Actual {controller.upper()} inference failed: {exc}")
-                if not allow_approx:
+                if not allow_approx or initial_conditions is not None:
                     st.info("Restore the frozen checkpoint for PPO or fix the reported error, then retry.")
                     st.stop()
 
     if not success:
+        if initial_conditions is not None:
+            st.error("Custom starts require actual controller inference. No approximation flight was generated.")
+            st.stop()
         if not allow_approx:
             st.error("Actual inference is unavailable. No episode was generated.")
             st.stop()
@@ -174,7 +207,8 @@ final = frame.iloc[-1]
 if src == "approx":
     st.warning("Physics approximation · hand-coded fallback, not the trained PPO model.")
 else:
-    st.caption(f"{meta['controller'].upper()} controller · seed {meta['seed']}")
+    start_label = "custom start" if meta.get("start_mode") == "custom" else "randomized start"
+    st.caption(f"{meta['controller'].upper()} controller · {start_label} · seed {meta['seed']}")
 
 # ── Playback controls ─────────────────────────────────────────────────────────
 fidx: int = st.session_state.get(FIDX_KEY, 0)
