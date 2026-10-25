@@ -400,7 +400,7 @@ def _frame_chart(frame: pd.DataFrame, fidx: int, outcome: str) -> go.Figure:
 
 chart_slot = st.empty()
 chart_slot.plotly_chart(_frame_chart(frame, fidx, outcome),
-                        width="stretch", key="live_main_chart")
+                        use_container_width=True, key="live_main_chart")
 
 # -- Live altitude phase explanation / outcome banner ------------------------
 if is_done:
@@ -455,7 +455,7 @@ if fidx > 2 and should_update_tele:
     tele.update_xaxes(title_text="t (s)", gridcolor="rgba(255,255,255,0.04)")
     tele.update_yaxes(gridcolor="rgba(255,255,255,0.04)")
     style(tele, height=220)
-    tele_slot.plotly_chart(tele, width="stretch", key="live_tele_chart")
+    tele_slot.plotly_chart(tele, use_container_width=True, key="live_tele_chart")
 
 # -- Advance to next frame (the actual animation loop) ------------------------
 if playing:

@@ -32,7 +32,7 @@ with controls[2]:
     seed = st.selectbox(
         "Episode (seed · outcome)",
         eligible,
-        format_func=lambda s: f"Seed {s} · {episodes[s]['outcome']}",
+        format_func=lambda s: f"Seed {s} · {episodes[s]['outcome']}" if s in episodes else str(s),
     )
 
 frame = trajectory(policy_key, seed)
@@ -72,11 +72,11 @@ st.caption(
 # ── Cinematic flight figure ────────────────────────────────────────────────
 st.subheader("Flight path")
 st.caption("Click ▶ Play to watch the descent. Trail colour = throttle level. Flame plume shows active thrust.")
-st.plotly_chart(flight_figure(frame, COLORS[policy_key]), width="stretch")
+st.plotly_chart(flight_figure(frame, COLORS[policy_key]), use_container_width=True)
 
 # ── Telemetry ──────────────────────────────────────────────────────────────
 st.subheader("Telemetry")
-st.plotly_chart(telemetry_figure(frame), width="stretch")
+st.plotly_chart(telemetry_figure(frame), use_container_width=True)
 st.caption(
     "Ten seeds were deliberately chosen to include PPO successes and failures. "
     "The headline scores use all 2,000 flights."

@@ -19,6 +19,7 @@ st.set_page_config(
 
 pages = [
     st.Page("pages/0_Overview.py", title="Mission overview", icon="🌑", default=True),
+    st.Page("pages/5_Gemma.py", title="Gemma Mission Test Lab", icon="🧪"),
     st.Page("pages/1_Simulator.py", title="Flight replay", icon="🎬"),
     st.Page("pages/2_Compare.py", title="Compare controllers", icon="📊"),
     st.Page("pages/3_Results.py", title="Training & evidence", icon="📋"),
