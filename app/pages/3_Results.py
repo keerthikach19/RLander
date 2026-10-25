@@ -21,10 +21,10 @@ for arm, rows in subset.groupby("arm"):
                     name=f"{arm} selected")
 fig.update_layout(xaxis_title="Transitions in this session (after the parent, where applicable)",
                   yaxis={"title": "Full-start validation success", "range": [0, 1], "tickformat": ".0%"})
-st.plotly_chart(style(fig), width="stretch")
+st.plotly_chart(style(fig), use_container_width=True)
 st.caption("Diamonds mark each run's selected checkpoint.")
 with st.expander("Validation data"):
-    st.dataframe(subset.drop(columns="version"), hide_index=True, width="stretch")
+    st.dataframe(subset.drop(columns="version"), hide_index=True, use_container_width=True)
 if version == "v7":
     arm = st.selectbox("Training trace", ["seed_14", "seed_15", "seed_16"], index=1)
     training = table(f"{arm}_training.csv")
@@ -34,16 +34,16 @@ if version == "v7":
         fig.add_scatter(x=training.env_steps, y=rate, name=name)
     fig.update_layout(xaxis_title="Additional training transitions",
                       yaxis={"title": "Training outcome fraction", "range": [0, 1], "tickformat": ".0%"})
-    st.plotly_chart(style(fig, 330), width="stretch")
+    st.plotly_chart(style(fig, 330), use_container_width=True)
     st.caption("Training outcomes · rolling 10-update window.")
 with st.expander("Checkpoint archive"):
     registry = json.loads((DATA / "checkpoint_registry.json").read_text())
     st.dataframe([{k: entry[k] for k in (
         "version", "arm", "additional_steps", "validation_successes", "validation_episodes", "checkpoint",
-    )} for entry in registry], hide_index=True, width="stretch")
+    )} for entry in registry], hide_index=True, use_container_width=True)
     st.caption("Checkpoint paths are relative to the local release bundle. Historical archives retain the other snapshots. The app never chooses a different model for each test flight.")
 with st.expander("Historical test results"):
-    st.dataframe(table("history.csv"), hide_index=True, width="stretch")
+    st.dataframe(table("history.csv"), hide_index=True, use_container_width=True)
     st.write("Each session used a different fresh test set. These rows are historical records, not a controlled estimate of improvement between sessions.")
 with st.expander("Evaluation method and downloads"):
     st.write("Validation sets differ across sessions. Refinements share trained parents. Training mixes partial-flight and full starts, so its outcome rates are not directly comparable to full-start validation. Late timeout growth remains unresolved.")

@@ -5,6 +5,34 @@ Optimization) controller and a hand-designed PD (proportional–derivative)
 baseline. The Europa MVP includes fuel consumption, sensor noise, randomized
 initial conditions, recorded flight replay, and optional live policy inference.
 
+## Gemma 4 Mission Test Lab
+
+The **Gemma Mission Test Lab** (available in the app sidebar) uses **Gemma 4
+through the Gemini API** to design controlled landing experiments. You describe
+a question in natural language — for example, *"What happens as sideways drift
+increases?"* — and Gemma proposes three probe scenarios that vary exactly one
+starting-state parameter around a nominal reference. The **frozen PPO** then
+flies every case with three matched seeds, and Gemma interprets the measured
+outcomes.
+
+Gemma's role is **experiment design and interpretation**, not training. The
+policy and its reward function are never changed. Unsupported requests (wind,
+terrain obstacles, multiple planets) are rejected explicitly rather than silently
+approximated.
+
+A recorded demo is bundled in `app/gemma_demo.json`. It captures a real Gemma
+API plan and actual simulator flights and works without an API key. To run your
+own experiments, set `GEMINI_API_KEY` in the environment or the Git-ignored `.env`
+file. The default model is `gemma-4-26b-a4b-it`.
+
+The first recorded experiment investigated sideways drift (horizontal velocity
+`vx`). Gemma selected −1 m/s, 5 m/s, and 12 m/s. At the two larger values (both
+outside training starts), PPO crashed on all six flights while PD landed on all
+six — a concrete demonstration of a controller limit found through structured
+testing.
+
+API reference: [Run Gemma with the Gemini API](https://ai.google.dev/gemma/docs/gemma_cloud_top_level).
+
 ## Frozen V7 result
 
 Training is complete. The release uses **seed 15 at +80,000 transitions**,
@@ -47,6 +75,7 @@ uv run --locked --python 3.13 python -m streamlit run app/Home.py
 Open the local URL printed by Streamlit. The dashboard contains:
 
 - **Mission overview:** release results and an example flight.
+- **Gemma Mission Test Lab:** describe a landing condition; Gemma designs probes, PPO flies them, and Gemma interprets the results. A recorded demo works without an API key.
 - **Flight replay:** recorded flights with trajectory and telemetry controls.
 - **Compare controllers:** PPO, its parent, and PD on matching test seeds.
 - **Training & evidence:** training curves, validation snapshots, and checkpoint registry.

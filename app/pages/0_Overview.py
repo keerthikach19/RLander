@@ -5,12 +5,17 @@ from app.ui import flight_figure, headline, summary, trajectory
 st.caption("EUROPA · AUTONOMOUS LANDING")
 st.title("Learning to land")
 st.write("A trained PPO controller guides a lander to Europa's surface using throttle and engine steering.")
+with st.container(border=True):
+    st.subheader("Ask Gemma 4 to investigate a landing condition")
+    st.write("Describe a question about drift, descent speed, or starting altitude. Gemma designs "
+             "controlled tests, the frozen PPO flies them, and you inspect measured outcomes.")
+    st.page_link("pages/5_Gemma.py", label="Open Gemma Mission Test Lab", icon="🧪")
 headline()
 st.caption("Results from 2,000 matched test flights per controller.")
 left, right = st.columns([1.6, 1])
 with left:
     seed = summary()["policies"]["ppo"]["replays"][0]["seed"]
-    st.plotly_chart(flight_figure(trajectory("ppo", seed), animate=True, index=0), width="stretch")
+    st.plotly_chart(flight_figure(trajectory("ppo", seed), animate=True, index=0), use_container_width=True)
     st.caption("Recorded evaluation flight · press Play to watch.")
 with right:
     st.subheader("Explore the mission")
